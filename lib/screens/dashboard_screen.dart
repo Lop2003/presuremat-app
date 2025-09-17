@@ -6,6 +6,7 @@ import 'package:fl_chart/fl_chart.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:golf_force_plate/screens/history_screen.dart';
+import 'package:golf_force_plate/widgets/foot_heatmap.dart';
 
 class PresentationDashboard extends StatefulWidget {
   const PresentationDashboard({super.key});
@@ -26,10 +27,25 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
   double _graphXValue = 0;
   final Random _random = Random();
 
+  // Heatmap data
+  List<List<double>> _leftFootPressure = [];
+  List<List<double>> _rightFootPressure = [];
+  bool _showHeatmap = true;
+
   @override
   void initState() {
     super.initState();
     _initializeGraphWithBaseline();
+    _initializeHeatmapData();
+  }
+
+  void _initializeHeatmapData() {
+    _leftFootPressure = HeatmapDataGenerator.generateRandomFootPressure(
+      isLeftFoot: true,
+    );
+    _rightFootPressure = HeatmapDataGenerator.generateRandomFootPressure(
+      isLeftFoot: false,
+    );
   }
 
   void _initializeGraphWithBaseline() {
@@ -62,16 +78,26 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
         'r': rightData[i].y,
       });
     }
+
+    // เตรียมข้อมูล heatmap แบบที่ Firestore รองรับ
+    final Map<String, dynamic> heatmapData = {
+      'leftFoot': _convert2DArrayToMap(_leftFootPressure),
+      'rightFoot': _convert2DArrayToMap(_rightFootPressure),
+      'swingPhase': _swingPhase,
+    };
+
     try {
       await FirebaseFirestore.instance.collection('swings').add({
         'userId': user.uid,
         'timestamp': Timestamp.now(),
         'dataPoints': dataPoints,
+        'heatmapData': heatmapData,
+        'swingPhase': _swingPhase,
       });
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Swing session saved!'),
+            content: Text('Swing session with heatmap saved!'),
             backgroundColor: Colors.green,
           ),
         );
@@ -185,6 +211,16 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
 
       _leftDataPoints.add(FlSpot(_graphXValue, left));
       _rightDataPoints.add(FlSpot(_graphXValue, right));
+
+      // อัปเดต heatmap ตาม swing phase
+      _leftFootPressure = HeatmapDataGenerator.generateSwingPhasePressure(
+        phase: _swingPhase,
+        isLeftFoot: true,
+      );
+      _rightFootPressure = HeatmapDataGenerator.generateSwingPhasePressure(
+        phase: _swingPhase,
+        isLeftFoot: false,
+      );
     });
   }
 
@@ -201,7 +237,7 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
     return Scaffold(
       backgroundColor: const Color(0xFF111827),
       body: SafeArea(
-        child: Padding(
+        child: SingleChildScrollView(
           padding: const EdgeInsets.all(20.0),
           child: Column(
             children: [
@@ -209,9 +245,14 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
               const SizedBox(height: 20),
               _buildWeightCards(),
               const SizedBox(height: 20),
-              Expanded(child: _buildChartCard()),
+              if (_showHeatmap) ...[
+                _buildHeatmapSection(),
+                const SizedBox(height: 20),
+              ],
+              _buildChartCard(),
               const SizedBox(height: 20),
               _buildRecordButton(),
+              const SizedBox(height: 20), // เพิ่มระยะห่างด้านล่าง
             ],
           ),
         ),
@@ -244,18 +285,24 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
           child: const Icon(Icons.sports_golf, color: Colors.white, size: 28),
         ),
         const SizedBox(width: 12),
-        const Text(
-          'Force Plate',
-          style: TextStyle(
-            fontSize: 24,
-            fontWeight: FontWeight.bold,
-            color: Colors.white,
-            letterSpacing: 0.5,
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Force Plate',
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                  letterSpacing: 0.5,
+                ),
+              ),
+              const SizedBox(height: 4),
+              _buildStatusBadge(),
+            ],
           ),
         ),
-        const Spacer(),
-        _buildStatusBadge(),
-        const SizedBox(width: 12),
         _buildActionButtons(context),
       ],
     ),
@@ -291,6 +338,14 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
 
   Widget _buildActionButtons(BuildContext context) => Row(
     children: [
+      IconButton(
+        icon: Icon(
+          _showHeatmap ? Icons.visibility : Icons.visibility_off,
+          color: Colors.white70,
+        ),
+        tooltip: _showHeatmap ? 'Hide Heatmap' : 'Show Heatmap',
+        onPressed: () => setState(() => _showHeatmap = !_showHeatmap),
+      ),
       IconButton(
         icon: const Icon(Icons.history, color: Colors.white70),
         tooltip: 'Swing History',
@@ -342,6 +397,7 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
   );
 
   Widget _buildChartCard() => Container(
+    height: 300, // กำหนดความสูงคงที่
     padding: const EdgeInsets.fromLTRB(20, 20, 20, 10),
     decoration: BoxDecoration(
       borderRadius: BorderRadius.circular(24),
@@ -379,7 +435,7 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
                   Text(
                     'Balance Analysis',
                     style: TextStyle(
-                      fontSize: 18,
+                      fontSize: 16,
                       fontWeight: FontWeight.w600,
                       color: Colors.white,
                     ),
@@ -389,7 +445,7 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
             ),
             const Spacer(),
             _LegendItem(label: 'Left', color: const Color(0xFF3B82F6)),
-            const SizedBox(width: 16),
+            const SizedBox(width: 12),
             _LegendItem(label: 'Right', color: const Color(0xFFEC4899)),
           ],
         ),
@@ -403,6 +459,191 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
       ],
     ),
   );
+
+  Widget _buildHeatmapSection() => Container(
+    padding: const EdgeInsets.all(20),
+    decoration: BoxDecoration(
+      borderRadius: BorderRadius.circular(20),
+      color: const Color(0xFF1F2937),
+      boxShadow: [
+        BoxShadow(
+          color: Colors.black.withOpacity(0.2),
+          blurRadius: 10,
+          offset: const Offset(0, 4),
+        ),
+      ],
+    ),
+    child: Column(
+      children: [
+        Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: Colors.orange.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: const Row(
+                children: [
+                  Icon(Icons.thermostat, color: Colors.orange, size: 18),
+                  SizedBox(width: 8),
+                  Text(
+                    'Foot Pressure Heatmap',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Spacer(),
+            Text(
+              _swingPhase,
+              style: const TextStyle(
+                color: Colors.white60,
+                fontSize: 14,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 20),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          children: [
+            Expanded(
+              child: Column(
+                children: [
+                  FootHeatmap(
+                    pressureData: _leftFootPressure,
+                    isLeftFoot: true,
+                    onTap: () => _updateHeatmapData(),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Left Foot',
+                    style: TextStyle(
+                      color: Colors.white.withOpacity(0.8),
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                children: [
+                  FootHeatmap(
+                    pressureData: _rightFootPressure,
+                    isLeftFoot: false,
+                    onTap: () => _updateHeatmapData(),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Right Foot',
+                    style: TextStyle(
+                      color: Colors.white.withOpacity(0.8),
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          decoration: BoxDecoration(
+            color: Colors.black.withOpacity(0.3),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: [
+              _buildHeatmapLegendItem('Low', Colors.blue),
+              _buildHeatmapLegendItem('Medium', Colors.yellow),
+              _buildHeatmapLegendItem('High', Colors.orange),
+              _buildHeatmapLegendItem('Very High', Colors.red),
+            ],
+          ),
+        ),
+      ],
+    ),
+  );
+
+  Widget _buildHeatmapLegendItem(String label, Color color) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 12,
+          height: 12,
+          decoration: BoxDecoration(
+            color: color,
+            borderRadius: BorderRadius.circular(2),
+          ),
+        ),
+        const SizedBox(width: 4),
+        Text(
+          label,
+          style: TextStyle(
+            color: Colors.white.withOpacity(0.7),
+            fontSize: 10,
+          ),
+        ),
+      ],
+    );
+  }
+
+  void _updateHeatmapData() {
+    setState(() {
+      _leftFootPressure = HeatmapDataGenerator.generateSwingPhasePressure(
+        phase: _swingPhase,
+        isLeftFoot: true,
+      );
+      _rightFootPressure = HeatmapDataGenerator.generateSwingPhasePressure(
+        phase: _swingPhase,
+        isLeftFoot: false,
+      );
+    });
+  }
+
+  // แปลง 2D array เป็น Map เพื่อให้ Firestore รองรับ
+  Map<String, dynamic> _convert2DArrayToMap(List<List<double>> array2D) {
+    final Map<String, dynamic> result = {};
+    for (int i = 0; i < array2D.length; i++) {
+      final Map<String, dynamic> row = {};
+      for (int j = 0; j < array2D[i].length; j++) {
+        row['col$j'] = array2D[i][j];
+      }
+      result['row$i'] = row;
+    }
+    return result;
+  }
+
+  // แปลง Map กลับเป็น 2D array (สำหรับการอ่านข้อมูล)
+  List<List<double>> _convertMapTo2DArray(Map<String, dynamic> map) {
+    final List<List<double>> result = [];
+    final rowKeys = map.keys.toList()..sort();
+    
+    for (final rowKey in rowKeys) {
+      final rowMap = map[rowKey] as Map<String, dynamic>;
+      final List<double> row = [];
+      final colKeys = rowMap.keys.toList()..sort();
+      
+      for (final colKey in colKeys) {
+        row.add((rowMap[colKey] as num).toDouble());
+      }
+      result.add(row);
+    }
+    return result;
+  }
 
   Widget _buildRecordButton() => Container(
     decoration: BoxDecoration(
