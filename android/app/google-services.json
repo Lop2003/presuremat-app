@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "437845037464",
+    "project_id": "golf-force-plate-app",
+    "storage_bucket": "golf-force-plate-app.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:437845037464:android:527ce68525a451fa625bed",
+        "android_client_info": {
+          "package_name": "com.example.golf_force_plate"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDth_GoljkfITrV3-gCJaiZDjKKCu-3JMc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
