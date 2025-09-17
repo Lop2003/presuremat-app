@@ -6,6 +6,7 @@ import 'package:fl_chart/fl_chart.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:golf_force_plate/screens/history_screen.dart';
+import 'package:golf_force_plate/screens/profile_screen.dart';
 import 'package:golf_force_plate/widgets/foot_heatmap.dart';
 
 class PresentationDashboard extends StatefulWidget {
@@ -257,6 +258,91 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
           ),
         ),
       ),
+      bottomNavigationBar: _buildBottomNavigationBar(context),
+    );
+  }
+
+  Widget _buildBottomNavigationBar(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xFF1F2937),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.3),
+            blurRadius: 10,
+            offset: const Offset(0, -2),
+          ),
+        ],
+      ),
+      child: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceAround,
+            children: [
+              _buildNavItem(
+                icon: Icons.home,
+                label: 'Home',
+                isActive: true,
+                onTap: () {},
+              ),
+              _buildNavItem(
+                icon: Icons.history,
+                label: 'History',
+                isActive: false,
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (ctx) => const HistoryScreen()),
+                ),
+              ),
+              _buildNavItem(
+                icon: Icons.person,
+                label: 'Profile',
+                isActive: false,
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (ctx) => const ProfileScreen()),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildNavItem({
+    required IconData icon,
+    required String label,
+    required bool isActive,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        decoration: BoxDecoration(
+          color: isActive ? Colors.blue.withOpacity(0.1) : Colors.transparent,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              icon,
+              color: isActive ? Colors.blue : Colors.white60,
+              size: 24,
+            ),
+            const SizedBox(height: 4),
+            Text(
+              label,
+              style: TextStyle(
+                color: isActive ? Colors.blue : Colors.white60,
+                fontSize: 12,
+                fontWeight: isActive ? FontWeight.w600 : FontWeight.normal,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -347,16 +433,18 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
         onPressed: () => setState(() => _showHeatmap = !_showHeatmap),
       ),
       IconButton(
+        icon: const Icon(Icons.person, color: Colors.white70),
+        tooltip: 'Profile',
+        onPressed: () => Navigator.of(context).push(
+          MaterialPageRoute(builder: (ctx) => const ProfileScreen()),
+        ),
+      ),
+      IconButton(
         icon: const Icon(Icons.history, color: Colors.white70),
         tooltip: 'Swing History',
         onPressed: () => Navigator.of(
           context,
         ).push(MaterialPageRoute(builder: (ctx) => const HistoryScreen())),
-      ),
-      IconButton(
-        icon: const Icon(Icons.logout, color: Colors.white70),
-        tooltip: 'Logout',
-        onPressed: () => FirebaseAuth.instance.signOut(),
       ),
     ],
   );
