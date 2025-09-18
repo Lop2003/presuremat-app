@@ -3,6 +3,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
 import 'package:golf_force_plate/screens/playback_screen.dart';
+import 'package:golf_force_plate/widgets/modern_app_bar.dart';
+import 'package:golf_force_plate/widgets/modern_card.dart';
 
 class HistoryScreen extends StatefulWidget {
   const HistoryScreen({super.key});
@@ -32,24 +34,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFF111827),
-      appBar: AppBar(
-        title: const Text(
-          'Swing History',
-          style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-        ),
-        centerTitle: true,
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        flexibleSpace: Container(
-          decoration: const BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [Color(0xFF1E293B), Color(0xFF0F172A)],
-            ),
-          ),
-        ),
-      ),
+      appBar: const ModernAppBar(title: 'Swing History'),
       body: Container(
         decoration: const BoxDecoration(
           gradient: LinearGradient(
@@ -182,7 +167,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
             final swingDocs = snapshot.data!.docs;
 
             return ListView.builder(
-              padding: const EdgeInsets.all(8.0),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               itemCount: swingDocs.length,
               itemBuilder: (context, index) {
                 final swingData =
@@ -213,33 +198,15 @@ class _HistoryScreenState extends State<HistoryScreen> {
                   }
                 }
 
-                return Card(
-                  margin: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 8,
-                  ),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(16),
-                    side: BorderSide(
-                      color: Colors.blueAccent.withOpacity(0.2),
-                      width: 1,
-                    ),
-                  ),
-                  elevation: 4,
-                  color: const Color(0xFF1E293B),
-                  child: InkWell(
-                    borderRadius: BorderRadius.circular(16),
-                    onTap: () {
-                      Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (ctx) =>
-                              PlaybackScreen(swingId: swingDocs[index].id),
-                        ),
-                      );
-                    },
-                    child: Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Row(
+                return ModernCard(
+                  onTap: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (ctx) => PlaybackScreen(swingId: swingDocs[index].id),
+                      ),
+                    );
+                  },
+                  child: Row(
                         children: [
                           Container(
                             width: 50,
@@ -319,8 +286,6 @@ class _HistoryScreenState extends State<HistoryScreen> {
                           ),
                         ],
                       ),
-                    ),
-                  ),
                 );
               },
             );

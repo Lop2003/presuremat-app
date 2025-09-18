@@ -369,7 +369,7 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
           ),
         ),
       ),
-      const SizedBox(width: 12), // ลด spacing
+      const SizedBox(width: 16),
       Expanded(
         child: TweenAnimationBuilder<double>(
           tween: Tween(begin: 0.0, end: 1.0),
@@ -756,10 +756,10 @@ class _WeightCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(16), // ลด padding จาก 24 เป็น 16
-      height: 140, // ลดความสูงจาก 150 เป็น 140
+      padding: const EdgeInsets.all(24),
+      constraints: const BoxConstraints(minHeight: 150),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(20), // ลด border radius
+        borderRadius: BorderRadius.circular(24),
         color: const Color(0xFF1F2937),
       ),
       child: Column(
@@ -769,27 +769,30 @@ class _WeightCard extends StatelessWidget {
             label,
             style: const TextStyle(
               color: Colors.white70,
-              fontSize: 14, // ลดขนาดฟอนต์
+              fontSize: 16,
               fontWeight: FontWeight.w500,
             ),
           ),
-          const Spacer(),
+          const SizedBox(height: 12),
           Center(
-            child: Text(
-              '${percentage.toStringAsFixed(1)}%',
-              style: TextStyle(
-                fontSize: 36, // ลดขนาดฟอนต์จาก 48 เป็น 36
-                fontWeight: FontWeight.bold,
-                color: color,
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(
+                '${percentage.toStringAsFixed(1)}%',
+                style: TextStyle(
+                  fontSize: 48,
+                  fontWeight: FontWeight.bold,
+                  color: color,
+                ),
               ),
             ),
           ),
-          const Spacer(),
+          const SizedBox(height: 12),
           ClipRRect(
-            borderRadius: BorderRadius.circular(8), // ลด border radius
+            borderRadius: BorderRadius.circular(10),
             child: LinearProgressIndicator(
               value: percentage / 100,
-              minHeight: 6, // ลดความสูงจาก 8 เป็น 6
+              minHeight: 8,
               backgroundColor: Colors.white.withOpacity(0.1),
               valueColor: AlwaysStoppedAnimation<Color>(color),
             ),
