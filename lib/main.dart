@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'firebase_options.dart';
 import 'package:golf_force_plate/screens/splash_screen.dart';
 
@@ -21,7 +22,7 @@ class GolfForcePlateApp extends StatelessWidget {
       theme: ThemeData(
         brightness: Brightness.dark,
         scaffoldBackgroundColor: const Color(0xFF0A0A0A),
-        fontFamily: 'Roboto',
+        textTheme: GoogleFonts.notoSansTextTheme(),
         colorScheme: const ColorScheme.dark(
           primary: Colors.blueAccent,
           secondary: Colors.cyanAccent,

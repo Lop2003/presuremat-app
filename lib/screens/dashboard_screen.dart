@@ -369,7 +369,7 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
           ),
         ),
       ),
-      const SizedBox(width: 16),
+      const SizedBox(width: 12), // ลด spacing
       Expanded(
         child: TweenAnimationBuilder<double>(
           tween: Tween(begin: 0.0, end: 1.0),
@@ -756,10 +756,10 @@ class _WeightCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(24),
-      height: 150,
+      padding: const EdgeInsets.all(16), // ลด padding จาก 24 เป็น 16
+      height: 140, // ลดความสูงจาก 150 เป็น 140
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(20), // ลด border radius
         color: const Color(0xFF1F2937),
       ),
       child: Column(
@@ -769,7 +769,7 @@ class _WeightCard extends StatelessWidget {
             label,
             style: const TextStyle(
               color: Colors.white70,
-              fontSize: 16,
+              fontSize: 14, // ลดขนาดฟอนต์
               fontWeight: FontWeight.w500,
             ),
           ),
@@ -778,7 +778,7 @@ class _WeightCard extends StatelessWidget {
             child: Text(
               '${percentage.toStringAsFixed(1)}%',
               style: TextStyle(
-                fontSize: 48,
+                fontSize: 36, // ลดขนาดฟอนต์จาก 48 เป็น 36
                 fontWeight: FontWeight.bold,
                 color: color,
               ),
@@ -786,10 +786,10 @@ class _WeightCard extends StatelessWidget {
           ),
           const Spacer(),
           ClipRRect(
-            borderRadius: BorderRadius.circular(10),
+            borderRadius: BorderRadius.circular(8), // ลด border radius
             child: LinearProgressIndicator(
               value: percentage / 100,
-              minHeight: 8,
+              minHeight: 6, // ลดความสูงจาก 8 เป็น 6
               backgroundColor: Colors.white.withOpacity(0.1),
               valueColor: AlwaysStoppedAnimation<Color>(color),
             ),

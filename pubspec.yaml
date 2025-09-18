@@ -39,6 +39,7 @@ dependencies:
   cloud_firestore: ^6.0.0
   google_sign_in: ^6.2.1
   intl: ^0.20.2
+  google_fonts: ^6.2.1
 
 
 dev_dependencies:
@@ -79,16 +80,15 @@ flutter:
   # list giving the asset and other descriptors for the font. For
   # example:
   # fonts:
-  #   - family: Schyler
+  #   - family: Noto Sans
   #     fonts:
-  #       - asset: fonts/Schyler-Regular.ttf
-  #       - asset: fonts/Schyler-Italic.ttf
-  #         style: italic
-  #   - family: Trajan Pro
-  #     fonts:
-  #       - asset: fonts/TrajanPro.ttf
-  #       - asset: fonts/TrajanPro_Bold.ttf
+  #       - asset: fonts/NotoSans-Regular.ttf
+  #       - asset: fonts/NotoSans-Bold.ttf
   #         weight: 700
+  #       - asset: fonts/NotoSans-Medium.ttf
+  #         weight: 500
+  #       - asset: fonts/NotoSans-Light.ttf
+  #         weight: 300
   #
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package
