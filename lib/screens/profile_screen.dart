@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:golf_force_plate/screens/auth_screen.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -11,7 +11,8 @@ class ProfileScreen extends StatefulWidget {
 }
 
 class _ProfileScreenState extends State<ProfileScreen> {
-  final User? _currentUser = FirebaseAuth.instance.currentUser;
+  final GoogleSignIn _googleSignIn = GoogleSignIn();
+  User? _currentUser;
   Map<String, dynamic>? _userData;
   bool _isLoading = true;
 
@@ -22,6 +23,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _loadUserData() async {
+    setState(() => _isLoading = true);
+    
+    _currentUser = FirebaseAuth.instance.currentUser;
     if (_currentUser != null) {
       try {
         final doc = await FirebaseFirestore.instance
@@ -35,25 +39,22 @@ class _ProfileScreenState extends State<ProfileScreen> {
             _isLoading = false;
           });
         } else {
-          setState(() {
-            _isLoading = false;
-          });
+          setState(() => _isLoading = false);
         }
       } catch (e) {
-        setState(() {
-          _isLoading = false;
-        });
+        setState(() => _isLoading = false);
       }
+    } else {
+      setState(() => _isLoading = false);
     }
   }
 
   Future<void> _signOut() async {
     try {
       await FirebaseAuth.instance.signOut();
+      await _googleSignIn.signOut();
       if (mounted) {
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (context) => const AuthScreen()),
-        );
+        Navigator.of(context).pushReplacementNamed('/auth');
       }
     } catch (e) {
       if (mounted) {
@@ -69,6 +70,27 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (_isLoading) {
+      return const Scaffold(
+        backgroundColor: Color(0xFF111827),
+        body: Center(
+          child: CircularProgressIndicator(),
+        ),
+      );
+    }
+
+    if (_currentUser == null) {
+      return const Scaffold(
+        backgroundColor: Color(0xFF111827),
+        body: Center(
+          child: Text(
+            'Please sign in to view profile',
+            style: TextStyle(color: Colors.white, fontSize: 18),
+          ),
+        ),
+      );
+    }
+
     return Scaffold(
       backgroundColor: const Color(0xFF111827),
       appBar: AppBar(
@@ -89,36 +111,39 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ),
         ),
       ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : SingleChildScrollView(
-              padding: const EdgeInsets.all(20.0),
-              child: Column(
-                children: [
-                  _buildProfileCard(),
-                  const SizedBox(height: 20),
-                  _buildStatsCard(),
-                  const SizedBox(height: 20),
-                  _buildSettingsCard(),
-                  const SizedBox(height: 20),
-                  _buildSignOutButton(),
-                ],
-              ),
-            ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(20.0),
+        child: Column(
+          children: [
+            _buildProfileHeader(),
+            const SizedBox(height: 30),
+            _buildProfileInfo(),
+            const SizedBox(height: 30),
+            _buildStatsSection(),
+            const SizedBox(height: 30),
+            _buildActionButtons(),
+            const SizedBox(height: 20),
+          ],
+        ),
+      ),
     );
   }
 
-  Widget _buildProfileCard() {
+  Widget _buildProfileHeader() {
     return Container(
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.all(30),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(20),
-        color: const Color(0xFF1F2937),
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Color(0xFF1E293B), Color(0xFF0F172A)],
+        ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.2),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
+            color: Colors.black.withOpacity(0.3),
+            blurRadius: 15,
+            offset: const Offset(0, 8),
           ),
         ],
       ),
@@ -126,30 +151,36 @@ class _ProfileScreenState extends State<ProfileScreen> {
         children: [
           // Profile Picture
           Container(
-            width: 100,
-            height: 100,
+            width: 120,
+            height: 120,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              gradient: const LinearGradient(
-                colors: [Colors.blueAccent, Colors.cyanAccent],
-              ),
+              border: Border.all(color: Colors.blueAccent, width: 3),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.blueAccent.withOpacity(0.3),
+                  blurRadius: 20,
+                  offset: const Offset(0, 5),
+                ),
+              ],
             ),
-            child: _currentUser?.photoURL != null
-                ? ClipOval(
-                    child: Image.network(
-                      _currentUser!.photoURL!,
-                      fit: BoxFit.cover,
-                    ),
-                  )
-                : Icon(
-                    Icons.person,
-                    size: 50,
-                    color: Colors.white.withOpacity(0.8),
-                  ),
+            child: CircleAvatar(
+              radius: 60,
+              backgroundColor: Colors.grey[800],
+              backgroundImage: _currentUser?.photoURL != null
+                  ? NetworkImage(_currentUser!.photoURL!)
+                  : null,
+              child: _currentUser?.photoURL == null
+                  ? Icon(
+                      Icons.person,
+                      size: 60,
+                      color: Colors.grey[400],
+                    )
+                  : null,
+            ),
           ),
-          const SizedBox(height: 16),
-          
-          // User Name
+          const SizedBox(height: 20),
+          // Name
           Text(
             _userData?['username'] ?? _currentUser?.displayName ?? 'Golf Player',
             style: const TextStyle(
@@ -157,9 +188,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
               fontWeight: FontWeight.bold,
               color: Colors.white,
             ),
+            textAlign: TextAlign.center,
           ),
           const SizedBox(height: 8),
-          
           // Email
           Text(
             _currentUser?.email ?? 'No email',
@@ -167,20 +198,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
               fontSize: 16,
               color: Colors.white.withOpacity(0.7),
             ),
+            textAlign: TextAlign.center,
           ),
-          const SizedBox(height: 16),
-          
-          // Member Since
+          const SizedBox(height: 12),
+          // Member since
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             decoration: BoxDecoration(
-              color: Colors.blue.withOpacity(0.1),
+              color: Colors.blueAccent.withOpacity(0.1),
               borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: Colors.blueAccent.withOpacity(0.3)),
             ),
             child: Text(
               'Member since ${_formatDate(_currentUser?.metadata.creationTime)}',
               style: const TextStyle(
-                color: Colors.blue,
+                color: Colors.blueAccent,
                 fontSize: 14,
                 fontWeight: FontWeight.w500,
               ),
@@ -191,27 +223,82 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  Widget _buildStatsCard() {
+  Widget _buildProfileInfo() {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(16),
         color: const Color(0xFF1F2937),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.2),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
+        border: Border.all(color: Colors.grey[700]!),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
-            'Statistics',
+            'Profile Information',
             style: TextStyle(
-              fontSize: 20,
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: Colors.white,
+            ),
+          ),
+          const SizedBox(height: 16),
+          _buildInfoRow('Username', _userData?['username'] ?? 'Not set'),
+          _buildInfoRow('Email', _currentUser?.email ?? 'Not set'),
+          _buildInfoRow('Phone', _userData?['phone'] ?? 'Not set'),
+          _buildInfoRow('Handicap', _userData?['handicap']?.toString() ?? 'Not set'),
+          _buildInfoRow('Experience Level', _userData?['experienceLevel'] ?? 'Not set'),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildInfoRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 120,
+            child: Text(
+              label,
+              style: TextStyle(
+                color: Colors.white.withOpacity(0.7),
+                fontSize: 14,
+              ),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 14,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStatsSection() {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+        color: const Color(0xFF1F2937),
+        border: Border.all(color: Colors.grey[700]!),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Golf Statistics',
+            style: TextStyle(
+              fontSize: 18,
               fontWeight: FontWeight.bold,
               color: Colors.white,
             ),
@@ -220,41 +307,23 @@ class _ProfileScreenState extends State<ProfileScreen> {
           Row(
             children: [
               Expanded(
-                child: _buildStatItem(
-                  'Total Swings',
-                  '0',
-                  Icons.golf_course,
-                  Colors.green,
-                ),
+                child: _buildStatCard('Total Swings', '${_userData?['totalSwings'] ?? 0}', Icons.golf_course),
               ),
+              const SizedBox(width: 12),
               Expanded(
-                child: _buildStatItem(
-                  'Best Score',
-                  '0',
-                  Icons.emoji_events,
-                  Colors.orange,
-                ),
+                child: _buildStatCard('Best Score', '${_userData?['bestScore'] ?? 0}', Icons.emoji_events),
               ),
             ],
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 12),
           Row(
             children: [
               Expanded(
-                child: _buildStatItem(
-                  'Practice Days',
-                  '0',
-                  Icons.calendar_today,
-                  Colors.blue,
-                ),
+                child: _buildStatCard('Practice Days', '${_userData?['practiceDays'] ?? 0}', Icons.calendar_today),
               ),
+              const SizedBox(width: 12),
               Expanded(
-                child: _buildStatItem(
-                  'Current Streak',
-                  '0',
-                  Icons.local_fire_department,
-                  Colors.red,
-                ),
+                child: _buildStatCard('Current Streak', '${_userData?['currentStreak'] ?? 0}', Icons.local_fire_department),
               ),
             ],
           ),
@@ -263,25 +332,28 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  Widget _buildStatItem(String title, String value, IconData icon, Color color) {
+  Widget _buildStatCard(String title, String value, IconData icon) {
     return Container(
       padding: const EdgeInsets.all(16),
-      margin: const EdgeInsets.all(4),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: color.withOpacity(0.3)),
+        color: Colors.grey[800],
+        border: Border.all(color: Colors.grey[700]!),
       ),
       child: Column(
         children: [
-          Icon(icon, color: color, size: 24),
+          Icon(
+            icon,
+            color: Colors.blueAccent,
+            size: 24,
+          ),
           const SizedBox(height: 8),
           Text(
             value,
-            style: TextStyle(
+            style: const TextStyle(
               fontSize: 20,
               fontWeight: FontWeight.bold,
-              color: color,
+              color: Colors.white,
             ),
           ),
           const SizedBox(height: 4),
@@ -298,112 +370,76 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  Widget _buildSettingsCard() {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(20),
-        color: const Color(0xFF1F2937),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.2),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'Settings',
-            style: TextStyle(
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
-              color: Colors.white,
+  Widget _buildActionButtons() {
+    return Column(
+      children: [
+        SizedBox(
+          width: double.infinity,
+          child: ElevatedButton.icon(
+            onPressed: () {
+              // TODO: Navigate to edit profile screen
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Edit Profile feature coming soon!'),
+                  backgroundColor: Colors.blue,
+                ),
+              );
+            },
+            icon: const Icon(Icons.edit),
+            label: const Text('Edit Profile'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.blueAccent,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
             ),
           ),
-          const SizedBox(height: 16),
-          _buildSettingItem(
-            'Notifications',
-            'Manage your notification preferences',
-            Icons.notifications,
-            () {},
-          ),
-          _buildSettingItem(
-            'Privacy',
-            'Control your data and privacy settings',
-            Icons.privacy_tip,
-            () {},
-          ),
-          _buildSettingItem(
-            'About',
-            'App version and information',
-            Icons.info,
-            () {},
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSettingItem(String title, String subtitle, IconData icon, VoidCallback onTap) {
-    return ListTile(
-      leading: Container(
-        padding: const EdgeInsets.all(8),
-        decoration: BoxDecoration(
-          color: Colors.blue.withOpacity(0.1),
-          borderRadius: BorderRadius.circular(8),
         ),
-        child: Icon(icon, color: Colors.blue, size: 20),
-      ),
-      title: Text(
-        title,
-        style: const TextStyle(
-          color: Colors.white,
-          fontSize: 16,
-          fontWeight: FontWeight.w500,
-        ),
-      ),
-      subtitle: Text(
-        subtitle,
-        style: TextStyle(
-          color: Colors.white.withOpacity(0.6),
-          fontSize: 14,
-        ),
-      ),
-      trailing: Icon(
-        Icons.arrow_forward_ios,
-        color: Colors.white.withOpacity(0.4),
-        size: 16,
-      ),
-      onTap: onTap,
-    );
-  }
-
-  Widget _buildSignOutButton() {
-    return Container(
-      width: double.infinity,
-      height: 56,
-      child: ElevatedButton.icon(
-        onPressed: _signOut,
-        icon: const Icon(Icons.logout, color: Colors.white),
-        label: const Text(
-          'Sign Out',
-          style: TextStyle(
-            fontSize: 16,
-            fontWeight: FontWeight.w600,
-            color: Colors.white,
+        const SizedBox(height: 12),
+        SizedBox(
+          width: double.infinity,
+          child: ElevatedButton.icon(
+            onPressed: () {
+              // TODO: Navigate to settings screen
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Settings feature coming soon!'),
+                  backgroundColor: Colors.grey,
+                ),
+              );
+            },
+            icon: const Icon(Icons.settings),
+            label: const Text('Settings'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.grey[700],
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
           ),
         ),
-        style: ElevatedButton.styleFrom(
-          backgroundColor: Colors.red,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
+        const SizedBox(height: 12),
+        SizedBox(
+          width: double.infinity,
+          child: ElevatedButton.icon(
+            onPressed: _signOut,
+            icon: const Icon(Icons.logout),
+            label: const Text('Sign Out'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red[600],
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
           ),
-          elevation: 0,
         ),
-      ),
+      ],
     );
   }
 

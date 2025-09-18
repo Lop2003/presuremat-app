@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:golf_force_plate/screens/auth_screen.dart';
-import 'package:golf_force_plate/screens/dashboard_screen.dart';
+import 'package:golf_force_plate/screens/main_screen.dart';
 
 class SplashScreen extends StatelessWidget {
   const SplashScreen({super.key});
@@ -19,7 +19,7 @@ class SplashScreen extends StatelessWidget {
         }
         // ถ้ามีข้อมูลผู้ใช้ (ล็อกอินอยู่)
         if (snapshot.hasData) {
-          return const PresentationDashboard();
+          return const MainScreen();
         }
         // ถ้าไม่มีข้อมูลผู้ใช้
         return const AuthScreen();
