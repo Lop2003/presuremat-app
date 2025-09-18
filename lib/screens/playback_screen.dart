@@ -360,7 +360,7 @@ class _PlaybackScreenState extends State<PlaybackScreen> {
   }
 
   Widget _buildTimelineControl(int totalDataPoints) {
-    final maxTime = _dataPoints.isNotEmpty ? _dataPoints.last['t'] as double : 0.0;
+    final maxTime = _dataPoints.isNotEmpty ? (_dataPoints.last['t'] as num).toDouble() : 0.0;
     
     return Container(
       padding: const EdgeInsets.all(20),
@@ -405,13 +405,14 @@ class _PlaybackScreenState extends State<PlaybackScreen> {
           ),
           const SizedBox(height: 16),
           Slider(
-            value: _currentTime,
+            value: _currentTime.clamp(0.0, maxTime),
             min: 0.0,
-            max: maxTime,
+            max: maxTime <= 0 ? 0.0 : maxTime,
             onChanged: (value) {
+              final clamped = value.clamp(0.0, maxTime);
               setState(() {
-                _currentTime = value;
-                _updateHeatmapForTime(value);
+                _currentTime = clamped;
+                _updateHeatmapForTime(_currentTime);
               });
             },
             activeColor: Colors.blue,
@@ -449,12 +450,17 @@ class _PlaybackScreenState extends State<PlaybackScreen> {
   void _startPlayback() {
     setState(() => _isPlaying = true);
     _playbackTimer = Timer.periodic(const Duration(milliseconds: 100), (timer) {
-      if (_currentTime >= _dataPoints.last['t']) {
+      final maxTime = _dataPoints.isNotEmpty ? (_dataPoints.last['t'] as num).toDouble() : 0.0;
+      if (_currentTime >= maxTime) {
+        setState(() {
+          _currentTime = maxTime;
+          _updateHeatmapForTime(_currentTime);
+        });
         _pausePlayback();
         return;
       }
       setState(() {
-        _currentTime += 0.1;
+        _currentTime = (_currentTime + 0.1).clamp(0.0, maxTime);
         _updateHeatmapForTime(_currentTime);
       });
     });

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_sign_in/google_sign_in.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 
 class AuthScreen extends StatefulWidget {
   const AuthScreen({super.key});
@@ -403,13 +404,13 @@ class _AuthScreenState extends State<AuthScreen>
                                 height: 56,
                                 child: OutlinedButton.icon(
                                   onPressed: _isLoading ? null : _signInWithGoogle,
-                                  icon: const Icon(
-                                    Icons.login,
-                                    color: Colors.red,
-                                    size: 24,
+                                  icon: const FaIcon(
+                                    FontAwesomeIcons.google,
+                                    color: Color(0xFFDB4437),
+                                    size: 20,
                                   ),
                                   label: const Text(
-                                    'Continue with Google',
+                                    'Sign in with Google',
                                     style: TextStyle(
                                       fontSize: 16,
                                       fontWeight: FontWeight.w600,
