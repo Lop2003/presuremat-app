@@ -6,6 +6,7 @@ import 'package:fl_chart/fl_chart.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:golf_force_plate/widgets/foot_heatmap.dart';
+import 'package:golf_force_plate/screens/sensor_display_screen.dart';
 
 class PresentationDashboard extends StatefulWidget {
   const PresentationDashboard({super.key});
@@ -338,6 +339,14 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
   Widget _buildActionButtons(BuildContext context) => Row(
     children: [
       IconButton(
+        icon: const Icon(Icons.sensors, color: Colors.white70),
+        tooltip: 'Sensor Display',
+        onPressed: () => Navigator.push(
+          context,
+          MaterialPageRoute(builder: (context) => const SensorDisplayScreen()),
+        ),
+      ),
+      IconButton(
         icon: Icon(
           _showHeatmap ? Icons.visibility : Icons.visibility_off,
           color: Colors.white70,
@@ -584,10 +593,7 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
         const SizedBox(width: 4),
         Text(
           label,
-          style: TextStyle(
-            color: Colors.white.withOpacity(0.7),
-            fontSize: 10,
-          ),
+          style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 10),
         ),
       ],
     );
@@ -623,12 +629,12 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
   List<List<double>> _convertMapTo2DArray(Map<String, dynamic> map) {
     final List<List<double>> result = [];
     final rowKeys = map.keys.toList()..sort();
-    
+
     for (final rowKey in rowKeys) {
       final rowMap = map[rowKey] as Map<String, dynamic>;
       final List<double> row = [];
       final colKeys = rowMap.keys.toList()..sort();
-      
+
       for (final colKey in colKeys) {
         row.add((rowMap[colKey] as num).toDouble());
       }

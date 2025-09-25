@@ -1,1 +1,27 @@
-{"flutter":{"platforms":{"android":{"default":{"projectId":"golf-force-plate-app","appId":"1:437845037464:android:527ce68525a451fa625bed","fileOutput":"android/app/google-services.json"}},"dart":{"lib/firebase_options.dart":{"projectId":"golf-force-plate-app","configurations":{"android":"1:437845037464:android:527ce68525a451fa625bed","web":"1:437845037464:web:29bb4fe176676384625bed","windows":"1:437845037464:web:f8641a9d0a235e31625bed"}}}}}}
+{
+  "firestore": {
+    "rules": "firestore.rules",
+    "indexes": "firestore.indexes.json"
+  },
+  "flutter": {
+    "platforms": {
+      "android": {
+        "default": {
+          "projectId": "golf-force-plate-app",
+          "appId": "1:437845037464:android:527ce68525a451fa625bed",
+          "fileOutput": "android/app/google-services.json"
+        }
+      },
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "golf-force-plate-app",
+          "configurations": {
+            "android": "1:437845037464:android:527ce68525a451fa625bed",
+            "web": "1:437845037464:web:29bb4fe176676384625bed",
+            "windows": "1:437845037464:web:f8641a9d0a235e31625bed"
+          }
+        }
+      }
+    }
+  }
+}

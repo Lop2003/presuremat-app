@@ -3,6 +3,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import 'dart:io' show Platform;
+import 'package:flutter/foundation.dart' show kIsWeb;
 
 class AuthScreen extends StatefulWidget {
   const AuthScreen({super.key});
@@ -101,6 +103,22 @@ class _AuthScreenState extends State<AuthScreen>
     setState(() => _isLoading = true);
     
     try {
+      // ตรวจสอบว่าอยู่บน Windows desktop หรือไม่
+      if (!kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
+        // สำหรับ desktop platforms ให้แสดงข้อความแจ้งเตือน
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Google Sign-In is not available on desktop. Please use Email/Password login.'),
+              backgroundColor: Colors.orange,
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
+        setState(() => _isLoading = false);
+        return;
+      }
+
       final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
       if (googleUser == null) {
         setState(() => _isLoading = false);
@@ -137,6 +155,66 @@ class _AuthScreenState extends State<AuthScreen>
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(12),
             ),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+
+  // ฟังก์ชันสำหรับสร้างบัญชี demo (สำหรับทดสอบ)
+  Future<void> _signInWithDemoAccount() async {
+    setState(() => _isLoading = true);
+    
+    const demoEmail = 'demo@golfforceplate.com';
+    const demoPassword = 'demo123456';
+    
+    try {
+      UserCredential userCredential;
+      
+      // พยายาม login ก่อน
+      try {
+        userCredential = await FirebaseAuth.instance.signInWithEmailAndPassword(
+          email: demoEmail,
+          password: demoPassword,
+        );
+      } catch (e) {
+        // ถ้า login ไม่ได้ ให้สร้างบัญชีใหม่
+        userCredential = await FirebaseAuth.instance.createUserWithEmailAndPassword(
+          email: demoEmail,
+          password: demoPassword,
+        );
+        
+        // เก็บข้อมูลผู้ใช้ใน Firestore
+        await FirebaseFirestore.instance
+            .collection('users')
+            .doc(userCredential.user!.uid)
+            .set({
+          'username': 'Demo User',
+          'email': demoEmail,
+          'photoUrl': null,
+        });
+      }
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Demo account signed in successfully!'),
+            backgroundColor: Colors.green,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Demo sign-in failed: ${error.toString()}'),
+            backgroundColor: Colors.redAccent,
+            behavior: SnackBarBehavior.floating,
           ),
         );
       }
@@ -426,6 +504,36 @@ class _AuthScreenState extends State<AuthScreen>
                                   ),
                                 ),
                               ),
+                              const SizedBox(height: 16),
+
+                              // Demo Account Button (สำหรับ Desktop)
+                              if (!kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS))
+                                Container(
+                                  height: 56,
+                                  child: OutlinedButton.icon(
+                                    onPressed: _isLoading ? null : _signInWithDemoAccount,
+                                    icon: const Icon(
+                                      Icons.person,
+                                      color: Color(0xFF10b981),
+                                      size: 20,
+                                    ),
+                                    label: const Text(
+                                      'Sign in with Demo Account',
+                                      style: TextStyle(
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                    style: OutlinedButton.styleFrom(
+                                      foregroundColor: Color(0xFF10b981),
+                                      side: BorderSide(color: Color(0xFF10b981)),
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(16),
+                                      ),
+                                      backgroundColor: Colors.white,
+                                    ),
+                                  ),
+                                ),
                               const SizedBox(height: 16),
 
                               // Submit Button
