@@ -101,15 +101,18 @@ class _AuthScreenState extends State<AuthScreen>
 
   Future<void> _signInWithGoogle() async {
     setState(() => _isLoading = true);
-    
+
     try {
       // ตรวจสอบว่าอยู่บน Windows desktop หรือไม่
-      if (!kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
+      if (!kIsWeb &&
+          (Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
         // สำหรับ desktop platforms ให้แสดงข้อความแจ้งเตือน
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('Google Sign-In is not available on desktop. Please use Email/Password login.'),
+              content: Text(
+                'Google Sign-In is not available on desktop. Please use Email/Password login.',
+              ),
               backgroundColor: Colors.orange,
               behavior: SnackBarBehavior.floating,
             ),
@@ -125,7 +128,8 @@ class _AuthScreenState extends State<AuthScreen>
         return;
       }
 
-      final GoogleSignInAuthentication googleAuth = await googleUser.authentication;
+      final GoogleSignInAuthentication googleAuth =
+          await googleUser.authentication;
       final credential = GoogleAuthProvider.credential(
         accessToken: googleAuth.accessToken,
         idToken: googleAuth.idToken,
@@ -140,10 +144,10 @@ class _AuthScreenState extends State<AuthScreen>
             .collection('users')
             .doc(userCredential.user!.uid)
             .set({
-          'username': googleUser.displayName ?? 'Google User',
-          'email': googleUser.email,
-          'photoUrl': googleUser.photoUrl,
-        });
+              'username': googleUser.displayName ?? 'Google User',
+              'email': googleUser.email,
+              'photoUrl': googleUser.photoUrl,
+            });
       }
     } catch (error) {
       if (mounted) {
@@ -168,13 +172,13 @@ class _AuthScreenState extends State<AuthScreen>
   // ฟังก์ชันสำหรับสร้างบัญชี demo (สำหรับทดสอบ)
   Future<void> _signInWithDemoAccount() async {
     setState(() => _isLoading = true);
-    
+
     const demoEmail = 'demo@golfforceplate.com';
     const demoPassword = 'demo123456';
-    
+
     try {
       UserCredential userCredential;
-      
+
       // พยายาม login ก่อน
       try {
         userCredential = await FirebaseAuth.instance.signInWithEmailAndPassword(
@@ -183,22 +187,23 @@ class _AuthScreenState extends State<AuthScreen>
         );
       } catch (e) {
         // ถ้า login ไม่ได้ ให้สร้างบัญชีใหม่
-        userCredential = await FirebaseAuth.instance.createUserWithEmailAndPassword(
-          email: demoEmail,
-          password: demoPassword,
-        );
-        
+        userCredential = await FirebaseAuth.instance
+            .createUserWithEmailAndPassword(
+              email: demoEmail,
+              password: demoPassword,
+            );
+
         // เก็บข้อมูลผู้ใช้ใน Firestore
         await FirebaseFirestore.instance
             .collection('users')
             .doc(userCredential.user!.uid)
             .set({
-          'username': 'Demo User',
-          'email': demoEmail,
-          'photoUrl': null,
-        });
+              'username': 'Demo User',
+              'email': demoEmail,
+              'photoUrl': null,
+            });
       }
-      
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -458,7 +463,9 @@ class _AuthScreenState extends State<AuthScreen>
                                     ),
                                   ),
                                   Padding(
-                                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 16,
+                                    ),
                                     child: Text(
                                       'OR',
                                       style: TextStyle(
@@ -481,7 +488,9 @@ class _AuthScreenState extends State<AuthScreen>
                               Container(
                                 height: 56,
                                 child: OutlinedButton.icon(
-                                  onPressed: _isLoading ? null : _signInWithGoogle,
+                                  onPressed: _isLoading
+                                      ? null
+                                      : _signInWithGoogle,
                                   icon: const FaIcon(
                                     FontAwesomeIcons.google,
                                     color: Color(0xFFDB4437),
@@ -507,11 +516,16 @@ class _AuthScreenState extends State<AuthScreen>
                               const SizedBox(height: 16),
 
                               // Demo Account Button (สำหรับ Desktop)
-                              if (!kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS))
+                              if (!kIsWeb &&
+                                  (Platform.isWindows ||
+                                      Platform.isLinux ||
+                                      Platform.isMacOS))
                                 Container(
                                   height: 56,
                                   child: OutlinedButton.icon(
-                                    onPressed: _isLoading ? null : _signInWithDemoAccount,
+                                    onPressed: _isLoading
+                                        ? null
+                                        : _signInWithDemoAccount,
                                     icon: const Icon(
                                       Icons.person,
                                       color: Color(0xFF10b981),
@@ -526,7 +540,9 @@ class _AuthScreenState extends State<AuthScreen>
                                     ),
                                     style: OutlinedButton.styleFrom(
                                       foregroundColor: Color(0xFF10b981),
-                                      side: BorderSide(color: Color(0xFF10b981)),
+                                      side: BorderSide(
+                                        color: Color(0xFF10b981),
+                                      ),
                                       shape: RoundedRectangleBorder(
                                         borderRadius: BorderRadius.circular(16),
                                       ),

@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'dart:convert';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../services/sensor_data_service.dart';
+import 'sensor_playback_screen.dart' as playback;
 
 class SensorDisplayScreen extends StatefulWidget {
   const SensorDisplayScreen({super.key});
@@ -407,87 +408,15 @@ class _SensorDisplayScreenState extends State<SensorDisplayScreen> {
     );
   }
 
-  // แสดงรายละเอียดของ session
+  // แสดงรายละเอียดของ session โดยไปยังหน้า playback
   void _showSessionDetails(String sessionId) {
-    showDialog(
-      context: context,
-      builder: (BuildContext context) {
-        return Dialog(
-          insetPadding: const EdgeInsets.all(20),
-          child: Container(
-            width: MediaQuery.of(context).size.width * 0.9,
-            height: MediaQuery.of(context).size.height * 0.8,
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
-                      'Session Details',
-                      style: Theme.of(context).textTheme.headlineSmall,
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.close),
-                      onPressed: () => Navigator.of(context).pop(),
-                    ),
-                  ],
-                ),
-                const Divider(),
-                Expanded(
-                  child: StreamBuilder(
-                    stream: _sensorDataService.getSensorReadings(sessionId),
-                    builder: (context, snapshot) {
-                      if (snapshot.connectionState == ConnectionState.waiting) {
-                        return const Center(child: CircularProgressIndicator());
-                      }
-
-                      if (snapshot.hasError) {
-                        return Center(
-                          child: Text('เกิดข้อผิดพลาด: ${snapshot.error}'),
-                        );
-                      }
-
-                      if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-                        return const Center(
-                          child: Text('ไม่มีข้อมูล sensor ในเซสชันนี้'),
-                        );
-                      }
-
-                      return ListView.builder(
-                        itemCount: snapshot.data!.docs.length,
-                        itemBuilder: (context, index) {
-                          final reading = snapshot.data!.docs[index];
-                          final data = reading.data() as Map<String, dynamic>;
-
-                          return ListTile(
-                            leading: CircleAvatar(
-                              backgroundColor: _getColorFromValue(
-                                data['value'],
-                              ),
-                              child: Text(
-                                '${data['row']},${data['col']}',
-                                style: const TextStyle(
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ),
-                            title: Text('Value: ${data['value']}'),
-                            subtitle: Text(
-                              'Position: (${data['row']}, ${data['col']}) - ${data['timestamp']?.toDate().toString().substring(11, 19) ?? 'Unknown time'}',
-                            ),
-                          );
-                        },
-                      );
-                    },
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => playback.SensorPlaybackScreen(
+          sessionId: sessionId,
+          sessionTitle: 'Sensor Session',
+        ),
+      ),
     );
   }
 
