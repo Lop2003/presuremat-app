@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_sign_in/google_sign_in.dart';
+import 'package:golf_force_plate/screens/auth_screen.dart';
+import 'package:golf_force_plate/widgets/user_profile_modal.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -54,7 +56,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
       await FirebaseAuth.instance.signOut();
       await _googleSignIn.signOut();
       if (mounted) {
-        Navigator.of(context).pushReplacementNamed('/auth');
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (context) => const AuthScreen()),
+        );
       }
     } catch (e) {
       if (mounted) {
@@ -376,14 +380,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
         SizedBox(
           width: double.infinity,
           child: ElevatedButton.icon(
-            onPressed: () {
-              // TODO: Navigate to edit profile screen
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Edit Profile feature coming soon!'),
-                  backgroundColor: Colors.blue,
-                ),
+            onPressed: () async {
+              final result = await showDialog<bool>(
+                context: context,
+                builder: (context) => const UserProfileModal(),
               );
+              
+              // Reload profile data if updated
+              if (result == true && mounted) {
+                _loadUserData();
+              }
             },
             icon: const Icon(Icons.edit),
             label: const Text('Edit Profile'),

@@ -1,12 +1,13 @@
-// --- COPY & PASTE ไฟล์นี้ทับของเดิมได้เลย ---
 import 'dart:async';
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:golf_force_plate/theme.dart'; // Import theme definitions
 import 'package:golf_force_plate/widgets/foot_heatmap.dart';
 import 'package:golf_force_plate/screens/sensor_display_screen.dart';
+import 'package:golf_force_plate/screens/auth_screen.dart';
 
 class PresentationDashboard extends StatefulWidget {
   const PresentationDashboard({super.key});
@@ -53,7 +54,6 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
     _rightDataPoints.clear();
     _graphXValue = 0;
 
-    // สร้างจุดเริ่มต้นมากขึ้นเพื่อให้เห็นเส้นฐานชัดเจน
     for (int i = 0; i < 20; i++) {
       double x = i * 0.1;
       _leftDataPoints.add(FlSpot(x, 50.0));
@@ -79,7 +79,6 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
       });
     }
 
-    // เตรียมข้อมูล heatmap แบบที่ Firestore รองรับ
     final Map<String, dynamic> heatmapData = {
       'leftFoot': _convert2DArrayToMap(_leftFootPressure),
       'rightFoot': _convert2DArrayToMap(_rightFootPressure),
@@ -96,9 +95,11 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
       });
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Swing session with heatmap saved!'),
-            backgroundColor: Colors.green,
+          SnackBar(
+            content: const Text('Session saved successfully'),
+            backgroundColor: AppColors.primary,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
           ),
         );
       }
@@ -107,7 +108,7 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Failed to save session: $e'),
-            backgroundColor: Colors.redAccent,
+            backgroundColor: AppColors.error,
           ),
         );
       }
@@ -117,7 +118,6 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
   void _simulateSwing() {
     if (_isSwinging) return;
 
-    // --- จุดแก้ไขสำคัญ ---
     setState(() {
       _leftDataPoints = [];
       _rightDataPoints = [];
@@ -125,7 +125,6 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
       _isSwinging = true;
       _swingPhase = "Backswing";
     });
-    // --------------------
 
     final List<FlSpot> currentSwingL = [];
     final List<FlSpot> currentSwingR = [];
@@ -148,14 +147,14 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
       double left;
 
       if (swingTime < 1.5) {
-        if (mounted) setState(() => _swingPhase = "Backswing");
+        if (mounted && _swingPhase != "Backswing") setState(() => _swingPhase = "Backswing");
         left = 50 - backswingPeak * (swingTime / 1.5);
       } else if (swingTime < 2.0) {
-        if (mounted) setState(() => _swingPhase = "Transition");
+        if (mounted && _swingPhase != "Transition") setState(() => _swingPhase = "Transition");
         left =
             (50 - backswingPeak) + transitionPeak * ((swingTime - 1.5) / 0.5);
       } else if (swingTime < 3.5) {
-        if (mounted) setState(() => _swingPhase = "Finish");
+        if (mounted && _swingPhase != "Finish") setState(() => _swingPhase = "Finish");
         left =
             (50 - backswingPeak + transitionPeak) +
             (finishPeak - (50 - backswingPeak + transitionPeak)) *
@@ -184,7 +183,7 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
       if (!mounted || (_leftWeightPercent - 50.0).abs() < 1.0) {
         if (mounted) {
           setState(() => _swingPhase = "Ready");
-          _initializeGraphWithBaseline(); // รีเซ็ตกราฟกลับเป็นเส้นฐาน
+          _initializeGraphWithBaseline();
         }
         backTimer.cancel();
       } else {
@@ -203,7 +202,6 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
 
       _graphXValue += 0.04;
 
-      // เก็บข้อมูลเฉพาะ 50 จุดล่าสุด
       if (_leftDataPoints.length > 50) {
         _leftDataPoints.removeAt(0);
         _rightDataPoints.removeAt(0);
@@ -212,7 +210,6 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
       _leftDataPoints.add(FlSpot(_graphXValue, left));
       _rightDataPoints.add(FlSpot(_graphXValue, right));
 
-      // อัปเดต heatmap ตาม swing phase
       _leftFootPressure = HeatmapDataGenerator.generateSwingPhasePressure(
         phase: _swingPhase,
         isLeftFoot: true,
@@ -235,24 +232,25 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF111827),
+      backgroundColor: AppColors.backgroundDark,
       body: SafeArea(
         child: SingleChildScrollView(
-          padding: const EdgeInsets.all(20.0),
+          padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 24.0),
           child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               _buildAppBar(context),
-              const SizedBox(height: 20),
+              const SizedBox(height: 24),
               _buildWeightCards(),
-              const SizedBox(height: 20),
+              const SizedBox(height: 24),
               if (_showHeatmap) ...[
                 _buildHeatmapSection(),
-                const SizedBox(height: 20),
+                const SizedBox(height: 24),
               ],
               _buildChartCard(),
-              const SizedBox(height: 20),
+              const SizedBox(height: 24),
               _buildRecordButton(),
-              const SizedBox(height: 20), // เพิ่มระยะห่างด้านล่าง
+              const SizedBox(height: 20),
             ],
           ),
         ),
@@ -260,40 +258,38 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
     );
   }
 
-  // โค้ด UI Widgets ที่เหลือเหมือนเดิมทั้งหมด
   Widget _buildAppBar(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
     decoration: BoxDecoration(
-      gradient: LinearGradient(
-        colors: [
-          const Color(0xFF1E293B).withOpacity(0.8),
-          const Color(0xFF0F172A).withOpacity(0.6),
-        ],
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
-      ),
-      borderRadius: BorderRadius.circular(16),
+      color: AppColors.surfaceDark,
+      borderRadius: BorderRadius.circular(20),
+      border: Border.all(color: Colors.white.withOpacity(0.05)),
+      boxShadow: [
+        BoxShadow(
+          color: Colors.black.withOpacity(0.2),
+          blurRadius: 15,
+          offset: const Offset(0, 5),
+        ),
+      ],
     ),
-    padding: const EdgeInsets.all(16),
     child: Row(
       children: [
         Container(
-          padding: const EdgeInsets.all(8),
+          padding: const EdgeInsets.all(10),
           decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.1),
-            borderRadius: BorderRadius.circular(12),
+            color: AppColors.primary.withOpacity(0.15),
+            borderRadius: BorderRadius.circular(14),
           ),
-          child: const Icon(Icons.sports_golf, color: Colors.white, size: 28),
+          child: const Icon(Icons.sports_golf, color: AppColors.primary, size: 28),
         ),
-        const SizedBox(width: 12),
+        const SizedBox(width: 16),
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
+              Text(
                 'Force Plate',
-                style: TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(
                   color: Colors.white,
                   letterSpacing: 0.5,
                 ),
@@ -308,59 +304,182 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
     ),
   );
 
-  Widget _buildStatusBadge() => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-    decoration: BoxDecoration(
-      color: _swingPhase == 'Ready'
-          ? Colors.green.withOpacity(0.2)
-          : Colors.orange.withOpacity(0.2),
-      borderRadius: BorderRadius.circular(20),
-    ),
-    child: Row(
+  Widget _buildStatusBadge() {
+    Color statusColor = _swingPhase == 'Ready'
+        ? AppColors.primary
+        : AppColors.accent;
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
       children: [
-        Icon(
-          Icons.circle,
-          color: _swingPhase == 'Ready' ? Colors.green : Colors.orange,
-          size: 10,
+        Container(
+           width: 8,
+           height: 8,
+           decoration: BoxDecoration(
+             color: statusColor,
+             shape: BoxShape.circle,
+             boxShadow: [
+               BoxShadow(color: statusColor.withOpacity(0.6), blurRadius: 6, spreadRadius: 1)
+             ]
+           ),
         ),
         const SizedBox(width: 8),
         Text(
-          _swingPhase,
+          _swingPhase.toUpperCase(),
           style: TextStyle(
-            color: Colors.white,
-            fontSize: 14,
-            fontWeight: FontWeight.w500,
+            color: statusColor,
+            fontSize: 12,
+            fontWeight: FontWeight.bold,
+            letterSpacing: 1,
           ),
         ),
       ],
-    ),
-  );
+    );
+  }
 
   Widget _buildActionButtons(BuildContext context) => Row(
     children: [
-      IconButton(
-        icon: const Icon(Icons.sensors, color: Colors.white70),
+      _buildIconButton(
+        icon: Icons.sensors,
         tooltip: 'Sensor Display',
         onPressed: () => Navigator.push(
           context,
           MaterialPageRoute(builder: (context) => const SensorDisplayScreen()),
         ),
       ),
-      IconButton(
-        icon: Icon(
-          _showHeatmap ? Icons.visibility : Icons.visibility_off,
-          color: Colors.white70,
-        ),
+      const SizedBox(width: 8),
+      _buildIconButton(
+        icon: _showHeatmap ? Icons.visibility : Icons.visibility_off,
         tooltip: _showHeatmap ? 'Hide Heatmap' : 'Show Heatmap',
         onPressed: () => setState(() => _showHeatmap = !_showHeatmap),
       ),
-      IconButton(
-        icon: const Icon(Icons.logout, color: Colors.white70),
+      const SizedBox(width: 8),
+      _buildIconButton(
+        icon: Icons.logout,
         tooltip: 'Logout',
-        onPressed: () => FirebaseAuth.instance.signOut(),
+        color: AppColors.error,
+        onPressed: () async {
+          await FirebaseAuth.instance.signOut();
+          if (context.mounted) {
+            Navigator.of(context).pushReplacement(
+              MaterialPageRoute(builder: (context) => const AuthScreen()),
+            );
+          }
+        },
       ),
     ],
   );
+
+  Widget _buildCameraPreview() {
+    return Container(
+      height: 220,
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: Colors.black,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: Colors.white.withOpacity(0.1)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.5),
+            blurRadius: 20,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          // Mock Camera Feed (Placeholder)
+          Container(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  Colors.grey[800]!,
+                  Colors.grey[900]!,
+                ],
+              ),
+            ),
+            child: Icon(
+              Icons.videocam_off_outlined,
+              size: 64,
+              color: Colors.white.withOpacity(0.1),
+            ),
+          ),
+
+
+          // Status Indicators
+          Positioned(
+            top: 16,
+            left: 16,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: Colors.black54,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.circle,
+                    size: 12,
+                    color: _isSwinging ? AppColors.error : AppColors.primary,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    _isSwinging ? 'REC' : 'LIVE',
+                    style: TextStyle(
+                      color: _isSwinging ? AppColors.error : Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          // Camera Controls (Mock)
+          Positioned(
+            bottom: 16,
+            right: 16,
+            child: Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.black54,
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.switch_camera, color: Colors.white),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildIconButton({
+    required IconData icon,
+    required String tooltip,
+    required VoidCallback onPressed,
+    Color? color,
+  }) {
+    return Container(
+      decoration: BoxDecoration(
+        color: (color ?? Colors.white).withOpacity(0.05),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: IconButton(
+        icon: Icon(icon, color: color ?? AppColors.textSecondary, size: 22),
+        tooltip: tooltip,
+        onPressed: onPressed,
+        constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+        padding: EdgeInsets.zero,
+      ),
+    );
+  }
+
 
   Widget _buildWeightCards() => Row(
     children: [
@@ -373,7 +492,8 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
             child: _WeightCard(
               label: "Left",
               percentage: _leftWeightPercent,
-              color: const Color(0xFF3B82F6),
+              color: AppColors.secondary,
+              side: 'L',
             ),
           ),
         ),
@@ -389,7 +509,8 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
             child: _WeightCard(
               label: "Right",
               percentage: _rightWeightPercent,
-              color: const Color(0xFFEC4899),
+              color: AppColors.primary,
+              side: 'R',
             ),
           ),
         ),
@@ -398,59 +519,48 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
   );
 
   Widget _buildChartCard() => Container(
-    height: 300, // กำหนดความสูงคงที่
-    padding: const EdgeInsets.fromLTRB(20, 20, 20, 10),
+    height: 320,
+    padding: const EdgeInsets.all(24),
     decoration: BoxDecoration(
       borderRadius: BorderRadius.circular(24),
-      color: const Color(0xFF1F2937),
+      color: AppColors.surfaceDark,
       boxShadow: [
         BoxShadow(
-          color: Colors.black.withOpacity(0.2),
-          blurRadius: 10,
-          offset: const Offset(0, 4),
+          color: Colors.black.withOpacity(0.3),
+          blurRadius: 20,
+          offset: const Offset(0, 10),
         ),
       ],
-      gradient: LinearGradient(
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
-        colors: [
-          const Color(0xFF1F2937),
-          const Color(0xFF1F2937).withOpacity(0.8),
-        ],
-      ),
+      border: Border.all(color: Colors.white.withOpacity(0.05)),
     ),
     child: Column(
       children: [
         Row(
           children: [
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: Colors.blue.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(12),
+                color: AppColors.secondary.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(10),
               ),
-              child: const Row(
-                children: [
-                  Icon(Icons.show_chart, color: Colors.blue, size: 18),
-                  SizedBox(width: 8),
-                  Text(
-                    'Balance Analysis',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                      color: Colors.white,
-                    ),
-                  ),
-                ],
+              child: const Icon(Icons.show_chart, color: AppColors.secondary, size: 20),
+            ),
+            const SizedBox(width: 12),
+            const Text(
+              'Balance Analysis',
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+                color: Colors.white,
               ),
             ),
             const Spacer(),
-            _LegendItem(label: 'Left', color: const Color(0xFF3B82F6)),
-            const SizedBox(width: 12),
-            _LegendItem(label: 'Right', color: const Color(0xFFEC4899)),
+            _LegendItem(label: 'Left', color: AppColors.secondary),
+            const SizedBox(width: 16),
+            _LegendItem(label: 'Right', color: AppColors.primary),
           ],
         ),
-        const SizedBox(height: 20),
+        const SizedBox(height: 24),
         Expanded(
           child: LineChart(
             _buildChartData(),
@@ -462,55 +572,59 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
   );
 
   Widget _buildHeatmapSection() => Container(
-    padding: const EdgeInsets.all(20),
+    padding: const EdgeInsets.all(24),
     decoration: BoxDecoration(
-      borderRadius: BorderRadius.circular(20),
-      color: const Color(0xFF1F2937),
+      borderRadius: BorderRadius.circular(24),
+      color: AppColors.surfaceDark,
       boxShadow: [
         BoxShadow(
-          color: Colors.black.withOpacity(0.2),
-          blurRadius: 10,
-          offset: const Offset(0, 4),
+          color: Colors.black.withOpacity(0.3),
+          blurRadius: 20,
+          offset: const Offset(0, 10),
         ),
       ],
+      border: Border.all(color: Colors.white.withOpacity(0.05)),
     ),
     child: Column(
       children: [
         Row(
           children: [
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: Colors.orange.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(12),
+                color: AppColors.accent.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(10),
               ),
-              child: const Row(
-                children: [
-                  Icon(Icons.thermostat, color: Colors.orange, size: 18),
-                  SizedBox(width: 8),
-                  Text(
-                    'Foot Pressure Heatmap',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ],
+              child: const Icon(Icons.thermostat, color: AppColors.accent, size: 20),
+            ),
+            const SizedBox(width: 12),
+            const Text(
+              'Foot Pressure',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
               ),
             ),
             const Spacer(),
-            Text(
-              _swingPhase,
-              style: const TextStyle(
-                color: Colors.white60,
-                fontSize: 14,
-                fontWeight: FontWeight.w500,
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.05),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Text(
+                _swingPhase,
+                style: const TextStyle(
+                  color: AppColors.textSecondary,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                ),
               ),
             ),
           ],
         ),
-        const SizedBox(height: 20),
+        const SizedBox(height: 24),
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceEvenly,
           children: [
@@ -522,19 +636,20 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
                     isLeftFoot: true,
                     onTap: () => _updateHeatmapData(),
                   ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Left Foot',
+                  const SizedBox(height: 12),
+                  const Text(
+                    'LEFT',
                     style: TextStyle(
-                      color: Colors.white.withOpacity(0.8),
+                      color: AppColors.textSecondary,
                       fontSize: 12,
-                      fontWeight: FontWeight.w500,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 1.2,
                     ),
                   ),
                 ],
               ),
             ),
-            const SizedBox(width: 16),
+            const SizedBox(width: 24),
             Expanded(
               child: Column(
                 children: [
@@ -543,13 +658,14 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
                     isLeftFoot: false,
                     onTap: () => _updateHeatmapData(),
                   ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Right Foot',
+                  const SizedBox(height: 12),
+                  const Text(
+                    'RIGHT',
                     style: TextStyle(
-                      color: Colors.white.withOpacity(0.8),
+                      color: AppColors.textSecondary,
                       fontSize: 12,
-                      fontWeight: FontWeight.w500,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 1.2,
                     ),
                   ),
                 ],
@@ -557,11 +673,11 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
             ),
           ],
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 20),
         Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
           decoration: BoxDecoration(
-            color: Colors.black.withOpacity(0.3),
+            color: AppColors.backgroundDark,
             borderRadius: BorderRadius.circular(12),
           ),
           child: Row(
@@ -570,7 +686,7 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
               _buildHeatmapLegendItem('Low', Colors.blue),
               _buildHeatmapLegendItem('Medium', Colors.yellow),
               _buildHeatmapLegendItem('High', Colors.orange),
-              _buildHeatmapLegendItem('Very High', Colors.red),
+              _buildHeatmapLegendItem('Max', Colors.red),
             ],
           ),
         ),
@@ -583,17 +699,17 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
       mainAxisSize: MainAxisSize.min,
       children: [
         Container(
-          width: 12,
-          height: 12,
+          width: 10,
+          height: 10,
           decoration: BoxDecoration(
             color: color,
-            borderRadius: BorderRadius.circular(2),
+            shape: BoxShape.circle,
           ),
         ),
-        const SizedBox(width: 4),
+        const SizedBox(width: 6),
         Text(
           label,
-          style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 10),
+          style: const TextStyle(color: AppColors.textSecondary, fontSize: 10),
         ),
       ],
     );
@@ -612,7 +728,6 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
     });
   }
 
-  // แปลง 2D array เป็น Map เพื่อให้ Firestore รองรับ
   Map<String, dynamic> _convert2DArrayToMap(List<List<double>> array2D) {
     final Map<String, dynamic> result = {};
     for (int i = 0; i < array2D.length; i++) {
@@ -625,61 +740,43 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
     return result;
   }
 
-  // แปลง Map กลับเป็น 2D array (สำหรับการอ่านข้อมูล)
-  List<List<double>> _convertMapTo2DArray(Map<String, dynamic> map) {
-    final List<List<double>> result = [];
-    final rowKeys = map.keys.toList()..sort();
-
-    for (final rowKey in rowKeys) {
-      final rowMap = map[rowKey] as Map<String, dynamic>;
-      final List<double> row = [];
-      final colKeys = rowMap.keys.toList()..sort();
-
-      for (final colKey in colKeys) {
-        row.add((rowMap[colKey] as num).toDouble());
-      }
-      result.add(row);
-    }
-    return result;
-  }
-
   Widget _buildRecordButton() => Container(
     decoration: BoxDecoration(
       borderRadius: BorderRadius.circular(30),
       boxShadow: [
         BoxShadow(
-          color: Colors.blue.withOpacity(0.2),
-          blurRadius: 10,
-          spreadRadius: 2,
-          offset: const Offset(0, 4),
+          color: (_isSwinging ? AppColors.surfaceLight : AppColors.primary).withOpacity(0.3),
+          blurRadius: 20,
+          spreadRadius: 0,
+          offset: const Offset(0, 8),
         ),
       ],
     ),
     child: SizedBox(
       width: double.infinity,
-      height: 60,
+      height: 64,
       child: ElevatedButton.icon(
         onPressed: _isSwinging ? null : _simulateSwing,
         icon: AnimatedSwitcher(
           duration: const Duration(milliseconds: 300),
           child: Icon(
-            _isSwinging ? Icons.sports_golf : Icons.golf_course_outlined,
-            size: 24,
+            _isSwinging ? Icons.hourglass_top : Icons.play_circle_fill,
+            size: 28,
             key: ValueKey(_isSwinging),
           ),
         ),
         label: Text(
-          _isSwinging ? 'Swinging...' : 'Start Record',
+          _isSwinging ? 'RECORDING SWING...' : 'START RECORDING',
           style: const TextStyle(
-            fontSize: 18,
-            fontWeight: FontWeight.bold,
-            letterSpacing: 0.5,
+            fontSize: 16,
+            fontWeight: FontWeight.w800,
+            letterSpacing: 1,
           ),
         ),
         style: ElevatedButton.styleFrom(
-          backgroundColor: _isSwinging ? Colors.grey[800] : Colors.blue,
+          backgroundColor: _isSwinging ? AppColors.surfaceLight : AppColors.primary,
           foregroundColor: Colors.white,
-          elevation: _isSwinging ? 0 : 4,
+          elevation: 0,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(30),
           ),
@@ -695,9 +792,9 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
         drawVerticalLine: true,
         horizontalInterval: 25,
         getDrawingHorizontalLine: (value) =>
-            FlLine(color: Colors.white24, strokeWidth: 0.5),
+            FlLine(color: Colors.white.withOpacity(0.05), strokeWidth: 1, dashArray: [5, 5]),
         getDrawingVerticalLine: (value) =>
-            FlLine(color: Colors.white12, strokeWidth: 0.5),
+            FlLine(color: Colors.white.withOpacity(0.05), strokeWidth: 1, dashArray: [5, 5]),
       ),
       titlesData: FlTitlesData(
         rightTitles: const AxisTitles(
@@ -715,7 +812,7 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
               padding: const EdgeInsets.only(right: 8),
               child: Text(
                 '${value.toInt()}%',
-                style: const TextStyle(color: Colors.white54, fontSize: 12),
+                style: const TextStyle(color: AppColors.textSecondary, fontSize: 10, fontWeight: FontWeight.bold),
               ),
             ),
             reservedSize: 40,
@@ -723,14 +820,19 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
         ),
       ),
       borderData: FlBorderData(show: false),
-      minX: _graphXValue - 2, // แสดงช่วง 2 วินาทีล่าสุด
+      minX: _graphXValue - 2,
       maxX: _graphXValue,
       minY: 0,
       maxY: 100,
       lineBarsData: [
-        _createLineChartBarData(_leftDataPoints, const Color(0xFF3B82F6)),
-        _createLineChartBarData(_rightDataPoints, const Color(0xFFEC4899)),
+        _createLineChartBarData(_leftDataPoints, AppColors.secondary),
+        _createLineChartBarData(_rightDataPoints, AppColors.primary),
       ],
+      lineTouchData: LineTouchData(
+        touchTooltipData: LineTouchTooltipData(
+          getTooltipColor: (touchedSpot) => AppColors.surfaceLight.withOpacity(0.9),
+        ),
+      ),
     );
   }
 
@@ -739,68 +841,112 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
       spots: spots,
       isCurved: true,
       color: color,
-      barWidth: 2,
+      barWidth: 3,
       isStrokeCapRound: true,
       dotData: const FlDotData(show: false),
-      belowBarData: BarAreaData(show: true, color: color.withOpacity(0.1)),
+      belowBarData: BarAreaData(
+        show: true,
+        gradient: LinearGradient(
+          colors: [
+            color.withOpacity(0.3),
+            color.withOpacity(0.0),
+          ],
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+        ),
+      ),
     );
   }
 }
 
-// ... Custom Widgets (_WeightCard, _LegendItem) ...
 class _WeightCard extends StatelessWidget {
   final String label;
   final double percentage;
   final Color color;
+  final String side;
 
   const _WeightCard({
     required this.label,
     required this.percentage,
     required this.color,
+    required this.side,
   });
 
   @override
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.all(24),
-      constraints: const BoxConstraints(minHeight: 150),
+      constraints: const BoxConstraints(minHeight: 160),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(24),
-        color: const Color(0xFF1F2937),
+        color: AppColors.surfaceDark,
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+             AppColors.surfaceDark,
+             AppColors.surfaceDark.withRed(35).withBlue(50), // Subtle shift
+          ],
+        ),
+        boxShadow: [
+          BoxShadow(
+             color: color.withOpacity(0.1),
+             blurRadius: 20,
+             offset: const Offset(0, 10),
+          )
+        ],
+        border: Border.all(color: Colors.white.withOpacity(0.05)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(
-            label,
-            style: const TextStyle(
-              color: Colors.white70,
-              fontSize: 16,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-          const SizedBox(height: 12),
-          Center(
-            child: FittedBox(
-              fit: BoxFit.scaleDown,
-              child: Text(
-                '${percentage.toStringAsFixed(1)}%',
-                style: TextStyle(
-                  fontSize: 48,
-                  fontWeight: FontWeight.bold,
-                  color: color,
+          Row(
+            children: [
+              Container(
+                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                 decoration: BoxDecoration(
+                   color: color.withOpacity(0.2),
+                   borderRadius: BorderRadius.circular(8),
+                 ),
+                 child: Text(side, style: TextStyle(color: color, fontWeight: FontWeight.bold)),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                label,
+                style: const TextStyle(
+                  color: AppColors.textSecondary,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w500,
                 ),
               ),
-            ),
+            ],
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 16),
+          Center(
+             child: Text(
+               '${percentage.toStringAsFixed(1)}%',
+               style: TextStyle(
+                 fontSize: 42,
+                 fontWeight: FontWeight.bold,
+                 color: Colors.white,
+                 shadows: [
+                   Shadow(
+                      color: color.withOpacity(0.5),
+                      blurRadius: 15,
+                   ),
+                 ],
+               ),
+             ),
+          ),
+          const SizedBox(height: 16),
           ClipRRect(
             borderRadius: BorderRadius.circular(10),
             child: LinearProgressIndicator(
               value: percentage / 100,
-              minHeight: 8,
-              backgroundColor: Colors.white.withOpacity(0.1),
+              backgroundColor: Colors.white10,
               valueColor: AlwaysStoppedAnimation<Color>(color),
+              minHeight: 8,
             ),
           ),
         ],
@@ -812,7 +958,9 @@ class _WeightCard extends StatelessWidget {
 class _LegendItem extends StatelessWidget {
   final String label;
   final Color color;
+
   const _LegendItem({required this.label, required this.color});
+
   @override
   Widget build(BuildContext context) {
     return Row(
@@ -820,12 +968,22 @@ class _LegendItem extends StatelessWidget {
         Container(
           width: 12,
           height: 12,
-          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+          decoration: BoxDecoration(
+            color: color,
+            shape: BoxShape.circle,
+            boxShadow: [
+               BoxShadow(color: color.withOpacity(0.5), blurRadius: 4),
+            ]
+          ),
         ),
         const SizedBox(width: 8),
         Text(
           label,
-          style: const TextStyle(color: Colors.white60, fontSize: 14),
+          style: const TextStyle(
+            color: AppColors.textSecondary,
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+          ),
         ),
       ],
     );

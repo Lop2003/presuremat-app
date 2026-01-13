@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:golf_force_plate/theme.dart'; // Import theme
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:golf_force_plate/screens/main_screen.dart';
 
 class AuthScreen extends StatefulWidget {
   const AuthScreen({super.key});
@@ -71,6 +73,22 @@ class _AuthScreenState extends State<AuthScreen>
               .collection('users')
               .doc(userCredential.user!.uid)
               .set({'username': _userName, 'email': _userEmail});
+          
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Account created successfully!'),
+                backgroundColor: AppColors.primary,
+                behavior: SnackBarBehavior.floating,
+              ),
+            );
+          }
+        }
+        
+        if (mounted) {
+           Navigator.of(context).pushReplacement(
+             MaterialPageRoute(builder: (context) => const MainScreen()),
+           );
         }
       } on FirebaseAuthException catch (err) {
         var message = 'An error occurred, please check your credentials!';
@@ -81,7 +99,7 @@ class _AuthScreenState extends State<AuthScreen>
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text(message),
-              backgroundColor: Colors.redAccent,
+              backgroundColor: AppColors.error,
               behavior: SnackBarBehavior.floating,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12),
@@ -103,17 +121,15 @@ class _AuthScreenState extends State<AuthScreen>
     setState(() => _isLoading = true);
 
     try {
-      // ตรวจสอบว่าอยู่บน Windows desktop หรือไม่
       if (!kIsWeb &&
           (Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
-        // สำหรับ desktop platforms ให้แสดงข้อความแจ้งเตือน
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               content: Text(
                 'Google Sign-In is not available on desktop. Please use Email/Password login.',
               ),
-              backgroundColor: Colors.orange,
+              backgroundColor: AppColors.accent,
               behavior: SnackBarBehavior.floating,
             ),
           );
@@ -138,7 +154,6 @@ class _AuthScreenState extends State<AuthScreen>
       final UserCredential userCredential = await FirebaseAuth.instance
           .signInWithCredential(credential);
 
-      // เก็บข้อมูลผู้ใช้ใน Firestore ถ้าเป็นผู้ใช้ใหม่
       if (userCredential.additionalUserInfo?.isNewUser == true) {
         await FirebaseFirestore.instance
             .collection('users')
@@ -149,12 +164,18 @@ class _AuthScreenState extends State<AuthScreen>
               'photoUrl': googleUser.photoUrl,
             });
       }
+      
+      if (mounted) {
+         Navigator.of(context).pushReplacement(
+           MaterialPageRoute(builder: (context) => const MainScreen()),
+         );
+      }
     } catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Google Sign-In failed: ${error.toString()}'),
-            backgroundColor: Colors.redAccent,
+            backgroundColor: AppColors.error,
             behavior: SnackBarBehavior.floating,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(12),
@@ -169,7 +190,6 @@ class _AuthScreenState extends State<AuthScreen>
     }
   }
 
-  // ฟังก์ชันสำหรับสร้างบัญชี demo (สำหรับทดสอบ)
   Future<void> _signInWithDemoAccount() async {
     setState(() => _isLoading = true);
 
@@ -178,22 +198,18 @@ class _AuthScreenState extends State<AuthScreen>
 
     try {
       UserCredential userCredential;
-
-      // พยายาม login ก่อน
       try {
         userCredential = await FirebaseAuth.instance.signInWithEmailAndPassword(
           email: demoEmail,
           password: demoPassword,
         );
       } catch (e) {
-        // ถ้า login ไม่ได้ ให้สร้างบัญชีใหม่
         userCredential = await FirebaseAuth.instance
             .createUserWithEmailAndPassword(
               email: demoEmail,
               password: demoPassword,
             );
 
-        // เก็บข้อมูลผู้ใช้ใน Firestore
         await FirebaseFirestore.instance
             .collection('users')
             .doc(userCredential.user!.uid)
@@ -208,9 +224,12 @@ class _AuthScreenState extends State<AuthScreen>
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Demo account signed in successfully!'),
-            backgroundColor: Colors.green,
+            backgroundColor: AppColors.primary,
             behavior: SnackBarBehavior.floating,
           ),
+        );
+        Navigator.of(context).pushReplacement(
+           MaterialPageRoute(builder: (context) => const MainScreen()),
         );
       }
     } catch (error) {
@@ -218,7 +237,7 @@ class _AuthScreenState extends State<AuthScreen>
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Demo sign-in failed: ${error.toString()}'),
-            backgroundColor: Colors.redAccent,
+            backgroundColor: AppColors.error,
             behavior: SnackBarBehavior.floating,
           ),
         );
@@ -233,12 +252,16 @@ class _AuthScreenState extends State<AuthScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: AppColors.backgroundDark,
       body: Container(
-        decoration: const BoxDecoration(
+        decoration: BoxDecoration(
           gradient: LinearGradient(
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
-            colors: [Color(0xFF1e3c72), Color(0xFF2a5298), Color(0xFF3b82f6)],
+            colors: [
+              AppColors.backgroundDark,
+              AppColors.backgroundDark.withBlue(30),
+            ],
           ),
         ),
         child: SafeArea(
@@ -250,63 +273,60 @@ class _AuthScreenState extends State<AuthScreen>
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    // Logo/Icon Section
                     Container(
                       width: 120,
                       height: 120,
                       decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.15),
+                        color: AppColors.surfaceDark,
                         shape: BoxShape.circle,
                         boxShadow: [
                           BoxShadow(
-                            color: Colors.black.withOpacity(0.2),
-                            blurRadius: 20,
+                            color: AppColors.primary.withOpacity(0.2),
+                            blurRadius: 30,
                             offset: const Offset(0, 10),
                           ),
                         ],
+                        border: Border.all(color: Colors.white.withOpacity(0.1)),
                       ),
                       child: const Icon(
                         Icons.sports_golf,
                         size: 60,
-                        color: Colors.white,
+                        color: AppColors.primary,
                       ),
                     ),
                     const SizedBox(height: 32),
-
-                    // App Title
-                    const Text(
+                    Text(
                       'Golf Force Plate',
-                      style: TextStyle(
-                        fontSize: 32,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.white,
-                        letterSpacing: 1.2,
-                      ),
+                      style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: 1.2,
+                          ),
                     ),
                     const SizedBox(height: 8),
                     Text(
                       'Analyze your golf swing balance',
                       style: TextStyle(
                         fontSize: 16,
-                        color: Colors.white.withOpacity(0.8),
-                        fontWeight: FontWeight.w300,
+                        color: Colors.white.withOpacity(0.6),
+                        fontWeight: FontWeight.w400,
                       ),
                     ),
                     const SizedBox(height: 48),
 
-                    // Form Card
                     Container(
                       constraints: const BoxConstraints(maxWidth: 400),
                       decoration: BoxDecoration(
-                        color: Colors.white,
+                        color: AppColors.surfaceDark.withOpacity(0.8),
                         borderRadius: BorderRadius.circular(24),
                         boxShadow: [
                           BoxShadow(
-                            color: Colors.black.withOpacity(0.1),
+                            color: Colors.black.withOpacity(0.3),
                             blurRadius: 30,
                             offset: const Offset(0, 15),
                           ),
                         ],
+                        border: Border.all(color: Colors.white.withOpacity(0.05)),
                       ),
                       child: Padding(
                         padding: const EdgeInsets.all(32.0),
@@ -315,12 +335,12 @@ class _AuthScreenState extends State<AuthScreen>
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
-                              // Toggle Buttons
                               Container(
                                 decoration: BoxDecoration(
-                                  color: Colors.grey[100],
-                                  borderRadius: BorderRadius.circular(12),
+                                  color: AppColors.backgroundDark,
+                                  borderRadius: BorderRadius.circular(16),
                                 ),
+                                padding: const EdgeInsets.all(4),
                                 child: Row(
                                   children: [
                                     Expanded(
@@ -332,11 +352,11 @@ class _AuthScreenState extends State<AuthScreen>
                                             milliseconds: 200,
                                           ),
                                           padding: const EdgeInsets.symmetric(
-                                            vertical: 16,
+                                            vertical: 12,
                                           ),
                                           decoration: BoxDecoration(
                                             color: _isLogin
-                                                ? const Color(0xFF3b82f6)
+                                                ? AppColors.primary
                                                 : Colors.transparent,
                                             borderRadius: BorderRadius.circular(
                                               12,
@@ -348,7 +368,7 @@ class _AuthScreenState extends State<AuthScreen>
                                             style: TextStyle(
                                               color: _isLogin
                                                   ? Colors.white
-                                                  : Colors.grey[600],
+                                                  : Colors.white54,
                                               fontWeight: FontWeight.w600,
                                               fontSize: 16,
                                             ),
@@ -365,11 +385,11 @@ class _AuthScreenState extends State<AuthScreen>
                                             milliseconds: 200,
                                           ),
                                           padding: const EdgeInsets.symmetric(
-                                            vertical: 16,
+                                            vertical: 12,
                                           ),
                                           decoration: BoxDecoration(
                                             color: !_isLogin
-                                                ? const Color(0xFF3b82f6)
+                                                ? AppColors.primary
                                                 : Colors.transparent,
                                             borderRadius: BorderRadius.circular(
                                               12,
@@ -381,7 +401,7 @@ class _AuthScreenState extends State<AuthScreen>
                                             style: TextStyle(
                                               color: !_isLogin
                                                   ? Colors.white
-                                                  : Colors.grey[600],
+                                                  : Colors.white54,
                                               fontWeight: FontWeight.w600,
                                               fontSize: 16,
                                             ),
@@ -394,34 +414,37 @@ class _AuthScreenState extends State<AuthScreen>
                               ),
                               const SizedBox(height: 32),
 
-                              // Username Field (only for signup)
                               AnimatedContainer(
                                 duration: const Duration(milliseconds: 300),
-                                height: !_isLogin ? 80 : 0,
-                                child: !_isLogin
-                                    ? Column(
-                                        children: [
-                                          _buildTextField(
-                                            key: 'username',
-                                            label: 'Username',
-                                            icon: Icons.person_outline,
-                                            validator: (value) {
-                                              if (value!.isEmpty ||
-                                                  value.length < 4) {
-                                                return 'Please enter at least 4 characters.';
-                                              }
-                                              return null;
-                                            },
-                                            onSaved: (value) =>
-                                                _userName = value!,
-                                          ),
-                                          const SizedBox(height: 16),
-                                        ],
-                                      )
-                                    : null,
+                                height: !_isLogin ? 100 : 0,
+                                clipBehavior: Clip.antiAlias,
+                                decoration: const BoxDecoration(),
+                                child: SingleChildScrollView(
+                                  physics: const NeverScrollableScrollPhysics(),
+                                  child: !_isLogin
+                                      ? Column(
+                                          children: [
+                                            _buildTextField(
+                                              key: 'username',
+                                              label: 'Username',
+                                              icon: Icons.person_outline,
+                                              validator: (value) {
+                                                if (value!.isEmpty ||
+                                                    value.length < 4) {
+                                                  return '4+ chars required.';
+                                                }
+                                                return null;
+                                              },
+                                              onSaved: (value) =>
+                                                  _userName = value!,
+                                            ),
+                                            const SizedBox(height: 16),
+                                          ],
+                                        )
+                                      : null,
+                                ),
                               ),
 
-                              // Email Field
                               _buildTextField(
                                 key: 'email',
                                 label: 'Email Address',
@@ -429,7 +452,7 @@ class _AuthScreenState extends State<AuthScreen>
                                 keyboardType: TextInputType.emailAddress,
                                 validator: (value) {
                                   if (value!.isEmpty || !value.contains('@')) {
-                                    return 'Please enter a valid email address.';
+                                    return 'Invalid email.';
                                   }
                                   return null;
                                 },
@@ -437,7 +460,6 @@ class _AuthScreenState extends State<AuthScreen>
                               ),
                               const SizedBox(height: 16),
 
-                              // Password Field
                               _buildTextField(
                                 key: 'password',
                                 label: 'Password',
@@ -445,7 +467,7 @@ class _AuthScreenState extends State<AuthScreen>
                                 obscureText: true,
                                 validator: (value) {
                                   if (value!.isEmpty || value.length < 7) {
-                                    return 'Password must be at least 7 characters long.';
+                                    return '7+ chars required.';
                                   }
                                   return null;
                                 },
@@ -453,12 +475,11 @@ class _AuthScreenState extends State<AuthScreen>
                               ),
                               const SizedBox(height: 24),
 
-                              // Divider
                               Row(
                                 children: [
                                   Expanded(
                                     child: Divider(
-                                      color: Colors.grey[300],
+                                      color: Colors.white.withOpacity(0.1),
                                       thickness: 1,
                                     ),
                                   ),
@@ -469,14 +490,14 @@ class _AuthScreenState extends State<AuthScreen>
                                     child: Text(
                                       'OR',
                                       style: TextStyle(
-                                        color: Colors.grey[600],
+                                        color: Colors.white.withOpacity(0.5),
                                         fontWeight: FontWeight.w500,
                                       ),
                                     ),
                                   ),
                                   Expanded(
                                     child: Divider(
-                                      color: Colors.grey[300],
+                                      color: Colors.white.withOpacity(0.1),
                                       thickness: 1,
                                     ),
                                   ),
@@ -484,8 +505,7 @@ class _AuthScreenState extends State<AuthScreen>
                               ),
                               const SizedBox(height: 24),
 
-                              // Google Sign-In Button
-                              Container(
+                              SizedBox(
                                 height: 56,
                                 child: OutlinedButton.icon(
                                   onPressed: _isLoading
@@ -493,7 +513,7 @@ class _AuthScreenState extends State<AuthScreen>
                                       : _signInWithGoogle,
                                   icon: const FaIcon(
                                     FontAwesomeIcons.google,
-                                    color: Color(0xFFDB4437),
+                                    color: Colors.white,
                                     size: 20,
                                   ),
                                   label: const Text(
@@ -501,26 +521,25 @@ class _AuthScreenState extends State<AuthScreen>
                                     style: TextStyle(
                                       fontSize: 16,
                                       fontWeight: FontWeight.w600,
+                                      color: Colors.white,
                                     ),
                                   ),
                                   style: OutlinedButton.styleFrom(
-                                    foregroundColor: Colors.black87,
-                                    side: BorderSide(color: Colors.grey[300]!),
+                                    foregroundColor: Colors.white,
+                                    side: BorderSide(color: Colors.white.withOpacity(0.2)),
                                     shape: RoundedRectangleBorder(
                                       borderRadius: BorderRadius.circular(16),
                                     ),
-                                    backgroundColor: Colors.white,
                                   ),
                                 ),
                               ),
                               const SizedBox(height: 16),
 
-                              // Demo Account Button (สำหรับ Desktop)
                               if (!kIsWeb &&
                                   (Platform.isWindows ||
                                       Platform.isLinux ||
                                       Platform.isMacOS))
-                                Container(
+                                SizedBox(
                                   height: 56,
                                   child: OutlinedButton.icon(
                                     onPressed: _isLoading
@@ -528,7 +547,7 @@ class _AuthScreenState extends State<AuthScreen>
                                         : _signInWithDemoAccount,
                                     icon: const Icon(
                                       Icons.person,
-                                      color: Color(0xFF10b981),
+                                      color: AppColors.primary,
                                       size: 20,
                                     ),
                                     label: const Text(
@@ -536,34 +555,34 @@ class _AuthScreenState extends State<AuthScreen>
                                       style: TextStyle(
                                         fontSize: 16,
                                         fontWeight: FontWeight.w600,
+                                        color: AppColors.primary,
                                       ),
                                     ),
                                     style: OutlinedButton.styleFrom(
-                                      foregroundColor: Color(0xFF10b981),
-                                      side: BorderSide(
-                                        color: Color(0xFF10b981),
+                                      foregroundColor: AppColors.primary,
+                                      side: const BorderSide(
+                                        color: AppColors.primary,
                                       ),
                                       shape: RoundedRectangleBorder(
                                         borderRadius: BorderRadius.circular(16),
                                       ),
-                                      backgroundColor: Colors.white,
                                     ),
                                   ),
                                 ),
-                              const SizedBox(height: 16),
+                              const SizedBox(height: 24),
 
-                              // Submit Button
-                              Container(
+                              SizedBox(
                                 height: 56,
                                 child: ElevatedButton(
                                   onPressed: _isLoading ? null : _trySubmit,
                                   style: ElevatedButton.styleFrom(
-                                    backgroundColor: const Color(0xFF3b82f6),
+                                    backgroundColor: AppColors.primary,
                                     foregroundColor: Colors.white,
                                     shape: RoundedRectangleBorder(
                                       borderRadius: BorderRadius.circular(16),
                                     ),
-                                    elevation: 0,
+                                    elevation: 8,
+                                    shadowColor: AppColors.primary.withOpacity(0.4),
                                   ),
                                   child: _isLoading
                                       ? const SizedBox(
@@ -590,13 +609,12 @@ class _AuthScreenState extends State<AuthScreen>
                     ),
                     const SizedBox(height: 24),
 
-                    // Footer Text
                     Text(
                       _isLogin
                           ? 'New to Golf Force Plate?'
                           : 'Already have an account?',
                       style: TextStyle(
-                        color: Colors.white.withOpacity(0.8),
+                        color: Colors.white.withOpacity(0.6),
                         fontSize: 14,
                       ),
                     ),
@@ -609,7 +627,7 @@ class _AuthScreenState extends State<AuthScreen>
                       child: Text(
                         _isLogin ? 'Create Account' : 'Login Instead',
                         style: const TextStyle(
-                          color: Colors.white,
+                          color: AppColors.primary,
                           fontSize: 16,
                           fontWeight: FontWeight.w600,
                         ),
@@ -640,36 +658,24 @@ class _AuthScreenState extends State<AuthScreen>
       obscureText: obscureText,
       validator: validator,
       onSaved: onSaved,
-      style: const TextStyle(fontSize: 16, color: Colors.black87),
+      style: const TextStyle(fontSize: 16, color: Colors.white),
       decoration: InputDecoration(
         labelText: label,
-        labelStyle: TextStyle(color: Colors.grey[600], fontSize: 16),
-        prefixIcon: Icon(icon, color: Colors.grey[600], size: 22),
+        labelStyle: TextStyle(color: Colors.white.withOpacity(0.6), fontSize: 16),
+        prefixIcon: Icon(icon, color: Colors.white.withOpacity(0.6), size: 22),
+        fillColor: AppColors.backgroundDark.withOpacity(0.5),
+        filled: true,
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: Colors.grey[300]!),
+          borderRadius: BorderRadius.circular(16),
+          borderSide: BorderSide.none,
         ),
         enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: Colors.grey[300]!),
+          borderRadius: BorderRadius.circular(16),
+          borderSide: BorderSide(color: Colors.white.withOpacity(0.1)),
         ),
         focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: Color(0xFF3b82f6), width: 2),
-        ),
-        errorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: Colors.redAccent),
-        ),
-        focusedErrorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: Colors.redAccent, width: 2),
-        ),
-        filled: true,
-        fillColor: Colors.grey[50],
-        contentPadding: const EdgeInsets.symmetric(
-          horizontal: 16,
-          vertical: 16,
+          borderRadius: BorderRadius.circular(16),
+          borderSide: const BorderSide(color: AppColors.primary, width: 2),
         ),
       ),
     );
