@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:golf_force_plate/theme.dart'; // Import theme definitions
-import 'package:golf_force_plate/widgets/foot_heatmap.dart';
+import 'package:golf_force_plate/widgets/simple_grid_heatmap.dart';
 import 'package:golf_force_plate/screens/sensor_display_screen.dart';
 import 'package:golf_force_plate/screens/auth_screen.dart';
 import 'package:camera/camera.dart';
@@ -92,12 +92,9 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
   }
 
   void _initializeHeatmapData() {
-    _leftFootPressure = HeatmapDataGenerator.generateRandomFootPressure(
-      isLeftFoot: true,
-    );
-    _rightFootPressure = HeatmapDataGenerator.generateRandomFootPressure(
-      isLeftFoot: false,
-    );
+    // Initialize with 5x5 grids of zeros (will be updated with real sensor data)
+    _leftFootPressure = List.generate(5, (_) => List.filled(5, 0.0));
+    _rightFootPressure = List.generate(5, (_) => List.filled(5, 0.0));
   }
 
   void _initializeGraphWithBaseline() {
@@ -348,13 +345,12 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
       _leftDataPoints.add(FlSpot(_graphXValue, left));
       _rightDataPoints.add(FlSpot(_graphXValue, right));
 
-      _leftFootPressure = HeatmapDataGenerator.generateSwingPhasePressure(
-        phase: _swingPhase,
-        isLeftFoot: true,
+      // Generate random 5x5 grids for display when simulating
+      _leftFootPressure = List.generate(5, (_) =>
+        List.generate(5, (_) => _random.nextDouble() * 100)
       );
-      _rightFootPressure = HeatmapDataGenerator.generateSwingPhasePressure(
-        phase: _swingPhase,
-        isLeftFoot: false,
+      _rightFootPressure = List.generate(5, (_) =>
+        List.generate(5, (_) => _random.nextDouble() * 100)
       );
     });
   }
@@ -452,7 +448,7 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
   void _processSerialData(List<int> sensors) {
     if (!mounted) return;
 
-    // Map sensors to 5x5 grids (raw)
+    // Map sensors to 5x5 grids (raw values 0-4095)
     // Left Foot: 0-24
     final leftGrid5x5 = _mapTo5x5Grid(sensors, 0);
     // Right Foot: 32-56
@@ -473,16 +469,21 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
     double leftPercent = total > 0 ? (leftTotal / total) * 100 : 50.0;
     double rightPercent = total > 0 ? (rightTotal / total) * 100 : 50.0;
     
-    // Scale 5x5 to 10x6 for FootHeatmap display
-    final leftGridDisplay = _scaleTo10x6(leftGrid5x5);
-    final rightGridDisplay = _scaleTo10x6(rightGrid5x5);
+    // Normalize 5x5 grids to 0-100 for display
+    const double maxRawValue = 4095.0;
+    final leftGridDisplay = leftGrid5x5.map((row) => 
+      row.map((v) => (v / maxRawValue * 100.0).clamp(0.0, 100.0)).toList()
+    ).toList();
+    final rightGridDisplay = rightGrid5x5.map((row) => 
+      row.map((v) => (v / maxRawValue * 100.0).clamp(0.0, 100.0)).toList()
+    ).toList();
 
     _updateDataFromSerial(leftPercent, rightPercent, leftGridDisplay, rightGridDisplay);
     
     // If recording, buffer the data
     if (_isRecording) {
       _recordedDataBuffer.add({
-        't': DateTime.now().millisecondsSinceEpoch, // temporary timestamp
+        't': DateTime.now().millisecondsSinceEpoch,
         'l': leftPercent,
         'r': rightPercent,
         'raw_left': leftGrid5x5,
@@ -508,33 +509,7 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
     }
     return grid;
   }
-  
-  // Scale 5x5 raw grid to 10x6 display grid (normalized to 0-100)
-  List<List<double>> _scaleTo10x6(List<List<double>> grid5x5) {
-    const int targetRows = 10;
-    const int targetCols = 6;
-    const double maxRawValue = 4095.0; // ESP32 ADC max
-    
-    List<List<double>> result = List.generate(targetRows, (_) => List.filled(targetCols, 0.0));
-    
-    for (int y = 0; y < targetRows; y++) {
-      for (int x = 0; x < targetCols; x++) {
-        // Map display coordinates back to source 5x5 grid
-        double srcY = y / (targetRows - 1) * 4; // Map 0-9 to 0-4
-        double srcX = x / (targetCols - 1) * 4; // Map 0-5 to 0-4
-        
-        // Nearest neighbor interpolation
-        int nearestY = srcY.round().clamp(0, 4);
-        int nearestX = srcX.round().clamp(0, 4);
-        
-        double rawValue = grid5x5[nearestY][nearestX];
-        // Normalize to 0-100
-        result[y][x] = (rawValue / maxRawValue * 100.0).clamp(0.0, 100.0);
-      }
-    }
-    
-    return result;
-  }
+  // _scaleTo10x6 removed - now using 5x5 grids directly with SimpleGridHeatmap
   
   void _updateDataFromSerial(double left, double right, List<List<double>> leftHeatmap, List<List<double>> rightHeatmap) {
       setState(() {
@@ -995,56 +970,31 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
             ),
           ],
         ),
-        const SizedBox(height: 24),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-          children: [
-            Expanded(
-              child: Column(
-                children: [
-                  FootHeatmap(
-                    pressureData: _leftFootPressure,
-                    isLeftFoot: true,
-                    onTap: () => _updateHeatmapData(),
-                  ),
-                  const SizedBox(height: 12),
-                  const Text(
-                    'LEFT',
-                    style: TextStyle(
-                      color: AppColors.textSecondary,
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: 1.2,
-                    ),
-                  ),
-                ],
+        const SizedBox(height: 16),
+        // Using SimpleGridHeatmap - simple 5x5 grids
+        SizedBox(
+          height: 200, // Fixed height for heatmaps
+          child: Row(
+            children: [
+              Expanded(
+                child: SimpleGridHeatmap(
+                  pressureData: _leftFootPressure,
+                  isLeftFoot: true,
+                  onTap: () => _updateHeatmapData(),
+                ),
               ),
-            ),
-            const SizedBox(width: 24),
-            Expanded(
-              child: Column(
-                children: [
-                  FootHeatmap(
-                    pressureData: _rightFootPressure,
-                    isLeftFoot: false,
-                    onTap: () => _updateHeatmapData(),
-                  ),
-                  const SizedBox(height: 12),
-                  const Text(
-                    'RIGHT',
-                    style: TextStyle(
-                      color: AppColors.textSecondary,
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: 1.2,
-                    ),
-                  ),
-                ],
+              const SizedBox(width: 16),
+              Expanded(
+                child: SimpleGridHeatmap(
+                  pressureData: _rightFootPressure,
+                  isLeftFoot: false,
+                  onTap: () => _updateHeatmapData(),
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
-        const SizedBox(height: 20),
+        const SizedBox(height: 16),
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
           decoration: BoxDecoration(
@@ -1057,9 +1007,9 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
               children: [
                 _buildHeatmapLegendItem('Low', Colors.blue),
                 const SizedBox(width: 12),
-                _buildHeatmapLegendItem('Medium', Colors.yellow),
+                _buildHeatmapLegendItem('Medium', Colors.cyan),
                 const SizedBox(width: 12),
-                _buildHeatmapLegendItem('High', Colors.orange),
+                _buildHeatmapLegendItem('High', Colors.yellow),
                 const SizedBox(width: 12),
                 _buildHeatmapLegendItem('Max', Colors.red),
               ],
@@ -1093,13 +1043,12 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
 
   void _updateHeatmapData() {
     setState(() {
-      _leftFootPressure = HeatmapDataGenerator.generateSwingPhasePressure(
-        phase: _swingPhase,
-        isLeftFoot: true,
+      // Generate random 5x5 grids for testing (values 0-100)
+      _leftFootPressure = List.generate(5, (_) =>
+        List.generate(5, (_) => _random.nextDouble() * 100)
       );
-      _rightFootPressure = HeatmapDataGenerator.generateSwingPhasePressure(
-        phase: _swingPhase,
-        isLeftFoot: false,
+      _rightFootPressure = List.generate(5, (_) =>
+        List.generate(5, (_) => _random.nextDouble() * 100)
       );
     });
   }
