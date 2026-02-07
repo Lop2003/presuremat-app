@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:intl/intl.dart';
 
 class SensorPlaybackScreen extends StatefulWidget {
@@ -49,16 +49,15 @@ class _SensorPlaybackScreenState extends State<SensorPlaybackScreen> {
         _error = '';
       });
 
-      final QuerySnapshot snapshot = await FirebaseFirestore.instance
-          .collection('sensor_readings')
-          .where('sessionId', isEqualTo: widget.sessionId)
-          .orderBy('timestamp', descending: false)
-          .get();
+      final List<dynamic> data = await Supabase.instance.client
+          .from('sensor_readings')
+          .select()
+          .eq('session_id', widget.sessionId)
+          .order('timestamp', ascending: true);
 
       final List<SensorReading> readings = [];
-      for (var doc in snapshot.docs) {
-        final data = doc.data() as Map<String, dynamic>;
-        readings.add(SensorReading.fromFirestore(data));
+      for (var item in data) {
+        readings.add(SensorReading.fromSupabase(item));
       }
 
       setState(() {
@@ -69,10 +68,12 @@ class _SensorPlaybackScreenState extends State<SensorPlaybackScreen> {
         }
       });
     } catch (e) {
-      setState(() {
-        _error = e.toString();
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+            _error = e.toString();
+            _isLoading = false;
+        });
+      }
     }
   }
 
@@ -98,9 +99,11 @@ class _SensorPlaybackScreenState extends State<SensorPlaybackScreen> {
       }
     }
 
-    setState(() {
-      _currentIndex = index;
-    });
+    if (mounted) {
+        setState(() {
+        _currentIndex = index;
+        });
+    }
   }
 
   void _startPlayback() {
@@ -438,12 +441,12 @@ class SensorReading {
     required this.timestamp,
   });
 
-  factory SensorReading.fromFirestore(Map<String, dynamic> data) {
+  factory SensorReading.fromSupabase(Map<String, dynamic> data) {
     return SensorReading(
-      row: data['row'] ?? 0,
-      col: data['col'] ?? 0,
+      row: data['row_index'] ?? 0,
+      col: data['col_index'] ?? 0,
       value: data['value'] ?? 0,
-      timestamp: (data['timestamp'] as Timestamp).toDate(),
+      timestamp: DateTime.parse(data['timestamp']),
     );
   }
 }

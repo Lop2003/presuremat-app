@@ -1,9 +1,11 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:intl/intl.dart';
 import 'package:golf_force_plate/widgets/foot_heatmap.dart';
+import 'package:video_player/video_player.dart';
+import 'dart:io';
 
 class PlaybackScreen extends StatefulWidget {
   final String swingId; // รับ ID ของ document เข้ามา
@@ -15,7 +17,7 @@ class PlaybackScreen extends StatefulWidget {
 }
 
 class _PlaybackScreenState extends State<PlaybackScreen> {
-  Future<DocumentSnapshot>? _swingDataFuture;
+  Future<Map<String, dynamic>?>? _swingDataFuture;
   double _currentTime = 0.0;
   bool _isPlaying = false;
   Timer? _playbackTimer;
@@ -23,20 +25,31 @@ class _PlaybackScreenState extends State<PlaybackScreen> {
   List<List<double>> _leftFootPressure = [];
   List<List<double>> _rightFootPressure = [];
   String _currentSwingPhase = 'Ready';
+  
+  VideoPlayerController? _videoController;
+  Future<void>? _initializeVideoPlayerFuture;
+  bool _hasVideo = false;
+
+  final SupabaseClient _supabase = Supabase.instance.client;
 
   @override
   void initState() {
     super.initState();
-    // ดึงข้อมูลแค่ครั้งเดียวเมื่อเปิดหน้าจอ
-    _swingDataFuture = FirebaseFirestore.instance
-        .collection('swings')
-        .doc(widget.swingId)
-        .get();
+    _fetchSwingData();
+  }
+
+  void _fetchSwingData() {
+    _swingDataFuture = _supabase
+        .from('swings')
+        .select()
+        .eq('id', widget.swingId)
+        .single();
   }
 
   @override
   void dispose() {
     _playbackTimer?.cancel();
+    _videoController?.dispose();
     super.dispose();
   }
 
@@ -47,13 +60,13 @@ class _PlaybackScreenState extends State<PlaybackScreen> {
         title: const Text('Swing Playback'),
         backgroundColor: const Color(0xFF1E293B),
       ),
-      body: FutureBuilder<DocumentSnapshot>(
+      body: FutureBuilder<Map<String, dynamic>?>(
         future: _swingDataFuture,
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
           }
-          if (!snapshot.hasData || !snapshot.data!.exists) {
+          if (!snapshot.hasData || snapshot.data == null) {
             return const Center(child: Text("Swing session not found."));
           }
           if (snapshot.hasError) {
@@ -61,14 +74,19 @@ class _PlaybackScreenState extends State<PlaybackScreen> {
           }
 
           // เมื่อมีข้อมูลแล้ว
-          final swingData = snapshot.data!.data() as Map<String, dynamic>;
-          final timestamp = (swingData['timestamp'] as Timestamp).toDate();
-          final dataPoints = swingData['dataPoints'] as List;
+          final swingData = snapshot.data!;
+          final timestamp = DateTime.parse(swingData['timestamp']);
+          final dataPoints = List<Map<String, dynamic>>.from(
+             (swingData['data_points'] ?? swingData['dataPoints']) as List
+          );
           
           // เก็บข้อมูลไว้ใน state
           if (_dataPoints.isEmpty) {
-            _dataPoints = List<Map<String, dynamic>>.from(dataPoints);
+            _dataPoints = dataPoints;
             _loadHeatmapData(swingData);
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              _initializeVideo(swingData);
+            });
           }
 
           // แปลงข้อมูลให้อยู่ในรูปแบบ FlSpot สำหรับกราฟ
@@ -96,6 +114,10 @@ class _PlaybackScreenState extends State<PlaybackScreen> {
               children: [
                 _buildHeader(timestamp, dataPoints.length),
                 const SizedBox(height: 20),
+                if (_hasVideo) ...[
+                   _buildVideoSection(),
+                   const SizedBox(height: 20),
+                ],
                 _buildHeatmapSection(),
                 const SizedBox(height: 20),
                 _buildChartSection(leftDataPoints, rightDataPoints),
@@ -111,17 +133,34 @@ class _PlaybackScreenState extends State<PlaybackScreen> {
   }
 
   void _loadHeatmapData(Map<String, dynamic> swingData) {
-    if (swingData.containsKey('heatmapData')) {
-      final heatmapData = swingData['heatmapData'] as Map<String, dynamic>;
-      _leftFootPressure = _convertMapTo2DArray(heatmapData['leftFoot'] as Map<String, dynamic>);
-      _rightFootPressure = _convertMapTo2DArray(heatmapData['rightFoot'] as Map<String, dynamic>);
-      _currentSwingPhase = heatmapData['swingPhase'] as String? ?? 'Ready';
+    final heatmapData = (swingData['heatmap_data'] ?? swingData['heatmapData']) as Map<String, dynamic>?;
+
+    if (heatmapData != null) {
+      // Check if data is stored as Map (legacy) or List (Supabase JSONB array)
+      _leftFootPressure = _parsePressureData(heatmapData['leftFoot']);
+      _rightFootPressure = _parsePressureData(heatmapData['rightFoot']);
+      _currentSwingPhase = heatmapData['swingPhase'] ?? heatmapData['swing_phase'] ?? 'Ready';
     } else {
       // สร้างข้อมูล heatmap เริ่มต้น
       _leftFootPressure = HeatmapDataGenerator.generateRandomFootPressure(isLeftFoot: true);
       _rightFootPressure = HeatmapDataGenerator.generateRandomFootPressure(isLeftFoot: false);
     }
   }
+
+  // Parse pressure data from either List<List> or Map (legacy)
+  List<List<double>> _parsePressureData(dynamic data) {
+      if (data == null) return HeatmapDataGenerator.generateRandomFootPressure(isLeftFoot: true); // fallback
+
+      if (data is List) {
+          // It's a list of lists
+          return (data).map<List<double>>((row) => (row as List).map<double>((e) => (e as num).toDouble()).toList()).toList();
+      } else if (data is Map) {
+          // Legacy map format
+          return _convertMapTo2DArray(data as Map<String, dynamic>);
+      }
+      return HeatmapDataGenerator.generateRandomFootPressure(isLeftFoot: true);
+  }
+
 
   // แปลง Map กลับเป็น 2D array (สำหรับการอ่านข้อมูล)
   List<List<double>> _convertMapTo2DArray(Map<String, dynamic> map) {
@@ -139,6 +178,112 @@ class _PlaybackScreenState extends State<PlaybackScreen> {
       result.add(row);
     }
     return result;
+  }
+
+  void _initializeVideo(Map<String, dynamic> swingData) {
+    final videoPath = swingData['video_path'] ?? swingData['videoPath'];
+    if (videoPath != null && videoPath.toString().isNotEmpty) {
+       VideoPlayerController? controller;
+       if (videoPath.startsWith('http')) {
+          controller = VideoPlayerController.networkUrl(Uri.parse(videoPath));
+       } else {
+          final file = File(videoPath);
+          if (file.existsSync()) {
+             controller = VideoPlayerController.file(file);
+          }
+       }
+
+       if (controller != null) {
+          _videoController = controller;
+          _initializeVideoPlayerFuture = _videoController!.initialize().then((_) {
+             if (mounted) setState(() => _hasVideo = true);
+          });
+       }
+    }
+  }
+
+  Widget _buildVideoSection() {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(20),
+        color: const Color(0xFF1F2937),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.2),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Swing Video',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: Colors.white,
+            ),
+          ),
+          const SizedBox(height: 16),
+          FutureBuilder(
+            future: _initializeVideoPlayerFuture,
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.done) {
+                return Container(
+                  height: 400,
+                  width: double.infinity,
+                  decoration: BoxDecoration(
+                    color: Colors.black,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: FittedBox(
+                      fit: BoxFit.contain,
+                      child: SizedBox(
+                        width: _videoController!.value.size.width,
+                        height: _videoController!.value.size.height,
+                        child: Stack(
+                          alignment: Alignment.bottomCenter,
+                          children: [
+                            VideoPlayer(_videoController!),
+                            VideoProgressIndicator(_videoController!, allowScrubbing: true),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              } else {
+                return const Center(child: CircularProgressIndicator());
+              }
+            },
+          ),
+          const SizedBox(height: 8),
+          Center(
+             child: IconButton(
+                onPressed: () {
+                  setState(() {
+                    if (_videoController!.value.isPlaying) {
+                      _videoController!.pause();
+                    } else {
+                      _videoController!.play();
+                    }
+                  });
+                },
+                icon: Icon(
+                  _videoController!.value.isPlaying ? Icons.pause : Icons.play_arrow,
+                  color: Colors.white,
+                  size: 32,
+                ),
+             )
+          )
+        ],
+      ),
+    );
   }
 
   Widget _buildHeader(DateTime timestamp, int dataPointCount) {

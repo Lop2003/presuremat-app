@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:intl/intl.dart';
 import 'package:golf_force_plate/screens/playback_screen.dart';
 import 'package:golf_force_plate/widgets/modern_app_bar.dart';
@@ -14,19 +13,21 @@ class HistoryScreen extends StatefulWidget {
 }
 
 class _HistoryScreenState extends State<HistoryScreen> {
-  late final Stream<QuerySnapshot> _swingsStream;
+  late final Stream<List<Map<String, dynamic>>> _swingsStream;
+  final SupabaseClient _supabase = Supabase.instance.client;
 
   @override
   void initState() {
     super.initState();
-    final user = FirebaseAuth.instance.currentUser;
+    final user = _supabase.auth.currentUser;
     if (user != null) {
-      // แก้ไข: เพิ่ม filter ตาม userId และเรียงลำดับ
-      _swingsStream = FirebaseFirestore.instance
-          .collection('swings')
-          .where('userId', isEqualTo: user.uid) // filter ตาม user
-          .orderBy('timestamp', descending: true) // เรียงจากใหม่ไปเก่า
-          .snapshots();
+      _swingsStream = _supabase
+          .from('swings')
+          .stream(primaryKey: ['id'])
+          .eq('user_id', user.id)
+          .order('timestamp', ascending: false);
+    } else {
+        _swingsStream = Stream.value([]);
     }
   }
 
@@ -43,17 +44,9 @@ class _HistoryScreenState extends State<HistoryScreen> {
             colors: [Color(0xFF111827), Color(0xFF0A0F1D)],
           ),
         ),
-        child: StreamBuilder<QuerySnapshot>(
+        child: StreamBuilder<List<Map<String, dynamic>>>(
           stream: _swingsStream,
           builder: (context, snapshot) {
-            // เพิ่ม Debug logging
-            print('ConnectionState: ${snapshot.connectionState}');
-            print('HasError: ${snapshot.hasError}');
-            print('HasData: ${snapshot.hasData}');
-            if (snapshot.hasData) {
-              print('Document count: ${snapshot.data!.docs.length}');
-            }
-
             if (snapshot.connectionState == ConnectionState.waiting) {
               return Center(
                 child: Column(
@@ -103,7 +96,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
               );
             }
 
-            if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+            if (!snapshot.hasData || snapshot.data!.isEmpty) {
               return Center(
                 child: Container(
                   padding: const EdgeInsets.all(32),
@@ -164,32 +157,41 @@ class _HistoryScreenState extends State<HistoryScreen> {
               );
             }
 
-            final swingDocs = snapshot.data!.docs;
+            final swingDocs = snapshot.data!;
 
             return ListView.builder(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               itemCount: swingDocs.length,
               itemBuilder: (context, index) {
-                final swingData =
-                    swingDocs[index].data() as Map<String, dynamic>;
+                final swingData = swingDocs[index];
 
                 // เพิ่มการตรวจสอบข้อมูล
                 if (!swingData.containsKey('timestamp') ||
-                    !swingData.containsKey('dataPoints')) {
-                  return const Card(
-                    child: ListTile(
-                      title: Text("Invalid data format"),
-                      subtitle: Text("Some required fields are missing"),
-                    ),
-                  );
+                    !swingData.containsKey('data_points')) {
+                   // Try fallback for dataPoints (camelCase) if migration mixed up
+                   if (!swingData.containsKey('dataPoints')) {
+                        return const Card(
+                        child: ListTile(
+                        title: Text("Invalid data format"),
+                        subtitle: Text("Some required fields are missing"),
+                        ),
+                    );
+                   }
                 }
 
-                final timestamp = (swingData['timestamp'] as Timestamp)
-                    .toDate();
-                final dataPoints = swingData['dataPoints'] as List;
+                DateTime timestamp;
+                try {
+                    timestamp = DateTime.parse(swingData['timestamp']);
+                } catch (e) {
+                    timestamp = DateTime.now();
+                }
+
+                // Handle both snake_case (Supabase) and potential camelCase if legacy
+                final dataPoints = (swingData['data_points'] ?? swingData['dataPoints']) as List;
 
                 double peakLeft = 0;
                 for (var point in dataPoints) {
+                  // JSONB format check
                   if (point is Map && point.containsKey('l')) {
                     final leftValue = (point['l'] as num).toDouble();
                     if (leftValue > peakLeft) {
@@ -202,7 +204,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
                   onTap: () {
                     Navigator.of(context).push(
                       MaterialPageRoute(
-                        builder: (ctx) => PlaybackScreen(swingId: swingDocs[index].id),
+                        builder: (ctx) => PlaybackScreen(swingId: swingData['id']),
                       ),
                     );
                   },
@@ -212,7 +214,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
                             width: 50,
                             height: 50,
                             decoration: BoxDecoration(
-                              gradient: LinearGradient(
+                              gradient: const LinearGradient(
                                 colors: [Colors.blue, Colors.blueAccent],
                               ),
                               borderRadius: BorderRadius.circular(12),

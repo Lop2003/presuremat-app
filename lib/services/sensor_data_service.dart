@@ -1,8 +1,9 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 class SensorDataService {
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  final String _collection = 'sensor_readings';
+  final SupabaseClient _supabase = Supabase.instance.client;
+  final String _readingsTable = 'sensor_readings';
+  final String _sessionsTable = 'sensor_sessions';
 
   /// บันทึกข้อมูล sensor reading เดี่ยว
   Future<void> saveSensorReading({
@@ -13,13 +14,12 @@ class SensorDataService {
     String? sessionId,
   }) async {
     try {
-      await _firestore.collection(_collection).add({
-        'row': row,
-        'col': col,
+      await _supabase.from(_readingsTable).insert({
+        'row_index': row,
+        'col_index': col,
         'value': value,
-        'timestamp': Timestamp.fromDate(timestamp),
-        'sessionId': sessionId ?? '',
-        'createdAt': FieldValue.serverTimestamp(),
+        'timestamp': timestamp.toIso8601String(),
+        'session_id': sessionId,
       });
     } catch (e) {
       print('Error saving sensor reading: $e');
@@ -30,21 +30,8 @@ class SensorDataService {
   /// บันทึกข้อมูล sensor readings หลายๆ ตัวในครั้งเดียว (batch)
   Future<void> saveSensorReadingsBatch(List<SensorReading> readings) async {
     try {
-      final batch = _firestore.batch();
-
-      for (final reading in readings) {
-        final docRef = _firestore.collection(_collection).doc();
-        batch.set(docRef, {
-          'row': reading.row,
-          'col': reading.col,
-          'value': reading.value,
-          'timestamp': Timestamp.fromDate(reading.timestamp),
-          'sessionId': reading.sessionId,
-          'createdAt': FieldValue.serverTimestamp(),
-        });
-      }
-
-      await batch.commit();
+      final List<Map<String, dynamic>> data = readings.map((r) => r.toMap()).toList();
+      await _supabase.from(_readingsTable).insert(data);
     } catch (e) {
       print('Error saving sensor readings batch: $e');
       rethrow;
@@ -54,17 +41,19 @@ class SensorDataService {
   /// สร้าง session ใหม่สำหรับการบันทึกข้อมูล
   Future<String> createSession({String? title, String? description}) async {
     try {
-      final sessionDoc = await _firestore.collection('sensor_sessions').add({
+      final user = _supabase.auth.currentUser;
+      if (user == null) throw Exception('User not logged in');
+
+      final response = await _supabase.from(_sessionsTable).insert({
+        'user_id': user.id,
         'title': title ?? 'Sensor Session ${DateTime.now().toString()}',
         'description': description ?? '',
-        'startTime': FieldValue.serverTimestamp(),
-        'endTime': null,
-        'totalReadings': 0,
-        'isActive': true,
-        'createdAt': FieldValue.serverTimestamp(),
-      });
+        'start_time': DateTime.now().toIso8601String(),
+        'total_readings': 0,
+        'is_active': true,
+      }).select().single();
 
-      return sessionDoc.id;
+      return response['id'] as String;
     } catch (e) {
       print('Error creating session: $e');
       rethrow;
@@ -74,53 +63,41 @@ class SensorDataService {
   /// อัพเดท session เมื่อสิ้นสุดการบันทึก
   Future<void> endSession(String sessionId, int totalReadings) async {
     try {
-      await _firestore.collection('sensor_sessions').doc(sessionId).update({
-        'endTime': FieldValue.serverTimestamp(),
-        'totalReadings': totalReadings,
-        'isActive': false,
-      });
+      await _supabase.from(_sessionsTable).update({
+        'end_time': DateTime.now().toIso8601String(),
+        'total_readings': totalReadings,
+        'is_active': false,
+      }).eq('id', sessionId);
     } catch (e) {
       print('Error ending session: $e');
       rethrow;
     }
   }
 
-  /// ดึงข้อมูล sessions ทั้งหมด
-  Stream<QuerySnapshot> getSessions() {
-    return _firestore
-        .collection('sensor_sessions')
-        .orderBy('createdAt', descending: true)
-        .snapshots();
+  /// ดึงข้อมูล sessions ทั้งหมด (Realtime)
+  Stream<List<Map<String, dynamic>>> getSessions() {
+    return _supabase
+        .from(_sessionsTable)
+        .stream(primaryKey: ['id'])
+        .order('created_at', ascending: false)
+        .map((event) => event);
   }
 
-  /// ดึงข้อมูล sensor readings ของ session เฉพาะ
-  Stream<QuerySnapshot> getSensorReadings(String sessionId) {
-    return _firestore
-        .collection(_collection)
-        .where('sessionId', isEqualTo: sessionId)
-        .orderBy('timestamp', descending: true)
-        .snapshots();
+  /// ดึงข้อมูล sensor readings ของ session เฉพาะ (Realtime)
+  Stream<List<Map<String, dynamic>>> getSensorReadings(String sessionId) {
+    return _supabase
+        .from(_readingsTable)
+        .stream(primaryKey: ['id'])
+        .eq('session_id', sessionId)
+        .order('timestamp', ascending: false)
+        .map((event) => event);
   }
 
-  /// ลบ session และข้อมูลที่เกี่ยวข้อง
+  /// ลบ session (Cascade delete will handle readings if configured, otherwise delete manually)
   Future<void> deleteSession(String sessionId) async {
     try {
-      final batch = _firestore.batch();
-
-      // ลบ session document
-      batch.delete(_firestore.collection('sensor_sessions').doc(sessionId));
-
-      // ลบ sensor readings ที่เกี่ยวข้อง
-      final readings = await _firestore
-          .collection(_collection)
-          .where('sessionId', isEqualTo: sessionId)
-          .get();
-
-      for (final doc in readings.docs) {
-        batch.delete(doc.reference);
-      }
-
-      await batch.commit();
+      // Assuming ON DELETE CASCADE is set in Supabase schema for foreign key
+      await _supabase.from(_sessionsTable).delete().eq('id', sessionId);
     } catch (e) {
       print('Error deleting session: $e');
       rethrow;
@@ -145,11 +122,11 @@ class SensorReading {
 
   Map<String, dynamic> toMap() {
     return {
-      'row': row,
-      'col': col,
+      'row_index': row,
+      'col_index': col,
       'value': value,
-      'timestamp': Timestamp.fromDate(timestamp),
-      'sessionId': sessionId,
+      'timestamp': timestamp.toIso8601String(),
+      'session_id': sessionId,
     };
   }
 }

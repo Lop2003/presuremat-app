@@ -1,0 +1,117 @@
+-- Enable UUID extension
+create extension if not exists "uuid-ossp";
+
+-- Users table-- Create profiles table
+create table profiles (
+  id uuid references auth.users not null primary key,
+  updated_at timestamp with time zone,
+  username text,
+  full_name text,
+  avatar_url text,
+  website text,
+  phone text,
+  handicap numeric,
+  experience_level text,
+  total_swings integer default 0,
+  best_score integer,
+  practice_days integer default 0,
+  current_streak integer default 0,
+  
+  constraint username_length check (char_length(username) >= 3)
+);
+
+-- Create sensor_sessions table
+create table sensor_sessions (
+  id uuid default gen_random_uuid() primary key,
+  user_id uuid references auth.users not null,
+  title text,
+  description text,
+  is_active boolean default true,
+  total_readings integer default 0,
+  started_at timestamp with time zone default timezone('utc'::text, now()) not null,
+  ended_at timestamp with time zone,
+  notes text,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+-- Create sensor_readings table
+create table sensor_readings (
+  id uuid default gen_random_uuid() primary key,
+  session_id uuid references sensor_sessions(id) on delete cascade not null,
+  row_index integer not null,
+  col_index integer not null,
+  value integer not null,
+  timestamp timestamp with time zone default timezone('utc'::text, now()) not null,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+-- Create swings table (for Dashboard simulation)
+create table swings (
+  id uuid default gen_random_uuid() primary key,
+  user_id uuid references auth.users not null,
+  data_points jsonb,
+  heatmap_data jsonb,
+  swing_phase text,
+  video_path text,
+  timestamp timestamp with time zone default timezone('utc'::text, now()) not null,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+-- Set up Row Level Security (RLS)
+alter table profiles enable row level security;
+alter table sensor_sessions enable row level security;
+alter table sensor_readings enable row level security;
+alter table swings enable row level security;
+
+-- Policies for profiles
+create policy "Public profiles are viewable by everyone." on profiles
+  for select using (true);
+
+create policy "Users can insert their own profile." on profiles
+  for insert with check (auth.uid() = id);
+
+create policy "Users can update their own profile." on profiles
+  for update using (auth.uid() = id);
+
+-- Policies for sensor_sessions
+create policy "Users can view their own sessions." on sensor_sessions
+  for select using (auth.uid() = user_id);
+
+create policy "Users can insert their own sessions." on sensor_sessions
+  for insert with check (auth.uid() = user_id);
+
+create policy "Users can update their own sessions." on sensor_sessions
+  for update using (auth.uid() = user_id);
+
+create policy "Users can delete their own sessions." on sensor_sessions
+  for delete using (auth.uid() = user_id);
+
+-- Policies for sensor_readings
+-- Users can view readings if they own the session
+create policy "Users can view their own readings." on sensor_readings
+  for select using (
+    exists (
+      select 1 from sensor_sessions
+      where sensor_sessions.id = sensor_readings.session_id
+      and sensor_sessions.user_id = auth.uid()
+    )
+  );
+
+create policy "Users can insert their own readings." on sensor_readings
+  for insert with check (
+    exists (
+      select 1 from sensor_sessions
+      where sensor_sessions.id = sensor_readings.session_id
+      and sensor_sessions.user_id = auth.uid()
+    )
+  );
+
+-- Policies for swings
+create policy "Users can view their own swings." on swings
+  for select using (auth.uid() = user_id);
+
+create policy "Users can insert their own swings." on swings
+  for insert with check (auth.uid() = user_id);
+
+create policy "Users can delete their own swings." on swings
+  for delete using (auth.uid() = user_id);

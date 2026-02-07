@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_libserialport/flutter_libserialport.dart';
 import 'dart:typed_data';
 import 'dart:convert';
-import 'package:firebase_auth/firebase_auth.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/sensor_data_service.dart';
 import 'sensor_playback_screen.dart' as playback;
 
@@ -27,6 +27,7 @@ class _SensorDisplayScreenState extends State<SensorDisplayScreen> {
 
   // Database related variables
   final SensorDataService _sensorDataService = SensorDataService();
+  final SupabaseClient _supabase = Supabase.instance.client;
   bool _isRecording = false;
   String? _currentSessionId;
   List<SensorReading> _pendingSensorReadings = [];
@@ -127,7 +128,7 @@ class _SensorDisplayScreenState extends State<SensorDisplayScreen> {
   Future<void> _startRecording() async {
     try {
       // ตรวจสอบว่า user login แล้วหรือยัง
-      final user = FirebaseAuth.instance.currentUser;
+      final user = _supabase.auth.currentUser;
       if (user == null) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -177,7 +178,7 @@ class _SensorDisplayScreenState extends State<SensorDisplayScreen> {
       // อัพเดท session ว่าสิ้นสุดแล้ว
       await _sensorDataService.endSession(
         _currentSessionId!,
-        _pendingSensorReadings.length,
+        _pendingSensorReadings.length, // This might need accumulation in updated logic if batch cleared
       );
 
       setState(() {
@@ -319,7 +320,7 @@ class _SensorDisplayScreenState extends State<SensorDisplayScreen> {
                 ),
                 const Divider(),
                 Expanded(
-                  child: StreamBuilder(
+                  child: StreamBuilder<List<Map<String, dynamic>>>(
                     stream: _sensorDataService.getSessions(),
                     builder: (context, snapshot) {
                       if (snapshot.connectionState == ConnectionState.waiting) {
@@ -332,17 +333,19 @@ class _SensorDisplayScreenState extends State<SensorDisplayScreen> {
                         );
                       }
 
-                      if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+                      if (!snapshot.hasData || snapshot.data!.isEmpty) {
                         return const Center(
                           child: Text('ยังไม่มีข้อมูลที่บันทึกไว้'),
                         );
                       }
 
+                      final sessions = snapshot.data!;
+
                       return ListView.builder(
-                        itemCount: snapshot.data!.docs.length,
+                        itemCount: sessions.length,
                         itemBuilder: (context, index) {
-                          final session = snapshot.data!.docs[index];
-                          final data = session.data() as Map<String, dynamic>;
+                          final data = sessions[index];
+                          final id = data['id'] as String;
 
                           return Card(
                             child: ListTile(
@@ -354,22 +357,22 @@ class _SensorDisplayScreenState extends State<SensorDisplayScreen> {
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   if (data['description'] != null &&
-                                      data['description'].isNotEmpty)
+                                      data['description'].toString().isNotEmpty)
                                     Text(
-                                      data['description'],
+                                      data['description'].toString(),
                                       overflow: TextOverflow.ellipsis,
                                       maxLines: 1,
                                     ),
                                   Text(
-                                    'Total: ${data['totalReadings'] ?? 0}',
+                                    'Total: ${data['total_readings'] ?? 0}',
                                     style: const TextStyle(
                                       fontWeight: FontWeight.bold,
                                     ),
                                   ),
                                   Text(
-                                    'Status: ${data['isActive'] == true ? 'Active' : 'Done'}',
+                                    'Status: ${data['is_active'] == true ? 'Active' : 'Done'}',
                                     style: TextStyle(
-                                      color: data['isActive'] == true
+                                      color: data['is_active'] == true
                                           ? Colors.green
                                           : Colors.grey,
                                     ),
@@ -382,14 +385,14 @@ class _SensorDisplayScreenState extends State<SensorDisplayScreen> {
                                   IconButton(
                                     icon: const Icon(Icons.visibility),
                                     onPressed: () =>
-                                        _showSessionDetails(session.id),
+                                        _showSessionDetails(id),
                                   ),
                                   IconButton(
                                     icon: const Icon(
                                       Icons.delete,
                                       color: Colors.red,
                                     ),
-                                    onPressed: () => _deleteSession(session.id),
+                                    onPressed: () => _deleteSession(id),
                                   ),
                                 ],
                               ),

@@ -6,18 +6,21 @@
 
 #include "generated_plugin_registrant.h"
 
-#include <cloud_firestore/cloud_firestore_plugin_c_api.h>
-#include <firebase_auth/firebase_auth_plugin_c_api.h>
-#include <firebase_core/firebase_core_plugin_c_api.h>
+#include <app_links/app_links_plugin_c_api.h>
+#include <camera_windows/camera_windows.h>
 #include <flutter_libserialport/flutter_libserialport_plugin.h>
+#include <url_launcher_windows/url_launcher_windows.h>
+#include <video_player_win/video_player_win_plugin_c_api.h>
 
 void RegisterPlugins(flutter::PluginRegistry* registry) {
-  CloudFirestorePluginCApiRegisterWithRegistrar(
-      registry->GetRegistrarForPlugin("CloudFirestorePluginCApi"));
-  FirebaseAuthPluginCApiRegisterWithRegistrar(
-      registry->GetRegistrarForPlugin("FirebaseAuthPluginCApi"));
-  FirebaseCorePluginCApiRegisterWithRegistrar(
-      registry->GetRegistrarForPlugin("FirebaseCorePluginCApi"));
+  AppLinksPluginCApiRegisterWithRegistrar(
+      registry->GetRegistrarForPlugin("AppLinksPluginCApi"));
+  CameraWindowsRegisterWithRegistrar(
+      registry->GetRegistrarForPlugin("CameraWindows"));
   FlutterLibserialportPluginRegisterWithRegistrar(
       registry->GetRegistrarForPlugin("FlutterLibserialportPlugin"));
+  UrlLauncherWindowsRegisterWithRegistrar(
+      registry->GetRegistrarForPlugin("UrlLauncherWindows"));
+  VideoPlayerWinPluginCApiRegisterWithRegistrar(
+      registry->GetRegistrarForPlugin("VideoPlayerWinPluginCApi"));
 }

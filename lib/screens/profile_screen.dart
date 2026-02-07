@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:golf_force_plate/screens/auth_screen.dart';
 import 'package:golf_force_plate/widgets/user_profile_modal.dart';
@@ -14,6 +13,7 @@ class ProfileScreen extends StatefulWidget {
 
 class _ProfileScreenState extends State<ProfileScreen> {
   final GoogleSignIn _googleSignIn = GoogleSignIn();
+  final SupabaseClient _supabase = Supabase.instance.client;
   User? _currentUser;
   Map<String, dynamic>? _userData;
   bool _isLoading = true;
@@ -27,23 +27,25 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Future<void> _loadUserData() async {
     setState(() => _isLoading = true);
     
-    _currentUser = FirebaseAuth.instance.currentUser;
+    _currentUser = _supabase.auth.currentUser;
     if (_currentUser != null) {
       try {
-        final doc = await FirebaseFirestore.instance
-            .collection('users')
-            .doc(_currentUser!.uid)
-            .get();
+        final data = await _supabase
+            .from('profiles')
+            .select()
+            .eq('id', _currentUser!.id)
+            .maybeSingle(); // Use maybeSingle to avoid exception if not found
         
-        if (doc.exists) {
+        if (data != null) {
           setState(() {
-            _userData = doc.data();
+            _userData = data;
             _isLoading = false;
           });
         } else {
           setState(() => _isLoading = false);
         }
       } catch (e) {
+        print('Error loading profile: $e');
         setState(() => _isLoading = false);
       }
     } else {
@@ -53,8 +55,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Future<void> _signOut() async {
     try {
-      await FirebaseAuth.instance.signOut();
-      await _googleSignIn.signOut();
+      await _supabase.auth.signOut();
+      await _googleSignIn.signOut(); // Sign out from Google as well if used
       if (mounted) {
         Navigator.of(context).pushReplacement(
           MaterialPageRoute(builder: (context) => const AuthScreen()),
@@ -134,6 +136,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Widget _buildProfileHeader() {
+    final avatarUrl = _userData?['avatar_url'] ?? _currentUser?.userMetadata?['avatar_url'];
+    final username = _userData?['username'] ?? _currentUser?.userMetadata?['name'] ?? 'Golf Player';
+
     return Container(
       padding: const EdgeInsets.all(30),
       decoration: BoxDecoration(
@@ -171,10 +176,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
             child: CircleAvatar(
               radius: 60,
               backgroundColor: Colors.grey[800],
-              backgroundImage: _currentUser?.photoURL != null
-                  ? NetworkImage(_currentUser!.photoURL!)
+              backgroundImage: avatarUrl != null
+                  ? NetworkImage(avatarUrl)
                   : null,
-              child: _currentUser?.photoURL == null
+              child: avatarUrl == null
                   ? Icon(
                       Icons.person,
                       size: 60,
@@ -186,7 +191,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           const SizedBox(height: 20),
           // Name
           Text(
-            _userData?['username'] ?? _currentUser?.displayName ?? 'Golf Player',
+            username,
             style: const TextStyle(
               fontSize: 24,
               fontWeight: FontWeight.bold,
@@ -214,7 +219,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               border: Border.all(color: Colors.blueAccent.withOpacity(0.3)),
             ),
             child: Text(
-              'Member since ${_formatDate(_currentUser?.metadata.creationTime)}',
+              'Member since ${_formatDate(DateTime.tryParse(_currentUser?.createdAt ?? ''))}',
               style: const TextStyle(
                 color: Colors.blueAccent,
                 fontSize: 14,
@@ -251,7 +256,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           _buildInfoRow('Email', _currentUser?.email ?? 'Not set'),
           _buildInfoRow('Phone', _userData?['phone'] ?? 'Not set'),
           _buildInfoRow('Handicap', _userData?['handicap']?.toString() ?? 'Not set'),
-          _buildInfoRow('Experience Level', _userData?['experienceLevel'] ?? 'Not set'),
+          _buildInfoRow('Experience Level', _userData?['experience_level'] ?? 'Not set'),
         ],
       ),
     );
@@ -311,11 +316,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
           Row(
             children: [
               Expanded(
-                child: _buildStatCard('Total Swings', '${_userData?['totalSwings'] ?? 0}', Icons.golf_course),
+                child: _buildStatCard('Total Swings', '${_userData?['total_swings'] ?? 0}', Icons.golf_course),
               ),
               const SizedBox(width: 12),
               Expanded(
-                child: _buildStatCard('Best Score', '${_userData?['bestScore'] ?? 0}', Icons.emoji_events),
+                child: _buildStatCard('Best Score', '${_userData?['best_score'] ?? 0}', Icons.emoji_events),
               ),
             ],
           ),
@@ -323,11 +328,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
           Row(
             children: [
               Expanded(
-                child: _buildStatCard('Practice Days', '${_userData?['practiceDays'] ?? 0}', Icons.calendar_today),
+                child: _buildStatCard('Practice Days', '${_userData?['practice_days'] ?? 0}', Icons.calendar_today),
               ),
               const SizedBox(width: 12),
               Expanded(
-                child: _buildStatCard('Current Streak', '${_userData?['currentStreak'] ?? 0}', Icons.local_fire_department),
+                child: _buildStatCard('Current Streak', '${_userData?['current_streak'] ?? 0}', Icons.local_fire_department),
               ),
             ],
           ),
@@ -350,7 +355,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             icon,
             color: Colors.blueAccent,
             size: 24,
-          ),
+            ),
           const SizedBox(height: 8),
           Text(
             value,

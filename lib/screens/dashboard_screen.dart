@@ -1,13 +1,16 @@
-import 'dart:async';
+  import 'dart:async';
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:golf_force_plate/theme.dart'; // Import theme definitions
 import 'package:golf_force_plate/widgets/foot_heatmap.dart';
 import 'package:golf_force_plate/screens/sensor_display_screen.dart';
 import 'package:golf_force_plate/screens/auth_screen.dart';
+import 'package:camera/camera.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:path/path.dart' as p;
+import 'dart:io';
 
 class PresentationDashboard extends StatefulWidget {
   const PresentationDashboard({super.key});
@@ -33,11 +36,35 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
   List<List<double>> _rightFootPressure = [];
   bool _showHeatmap = true;
 
+  // Camera
+  CameraController? _cameraController;
+  Future<void>? _initializeControllerFuture;
+  bool _isRecording = false;
+
+  final SupabaseClient _supabase = Supabase.instance.client;
+
   @override
   void initState() {
     super.initState();
     _initializeGraphWithBaseline();
     _initializeHeatmapData();
+    _initializeCamera();
+  }
+
+  Future<void> _initializeCamera() async {
+    try {
+      final cameras = await availableCameras();
+      if (cameras.isNotEmpty) {
+        _cameraController = CameraController(
+          cameras.first,
+          ResolutionPreset.medium,
+        );
+        _initializeControllerFuture = _cameraController!.initialize();
+        if (mounted) setState(() {});
+      }
+    } catch (e) {
+      debugPrint('Error initializing camera: $e');
+    }
   }
 
   void _initializeHeatmapData() {
@@ -66,10 +93,34 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
 
   Future<void> _saveSwingSession(
     List<FlSpot> leftData,
-    List<FlSpot> rightData,
-  ) async {
-    final user = FirebaseAuth.instance.currentUser;
+    List<FlSpot> rightData, {
+    String? videoPath,
+  }) async {
+    final user = _supabase.auth.currentUser;
     if (user == null) return;
+    
+    String? publicVideoUrl;
+    if (videoPath != null) {
+      final videoFile = File(videoPath);
+      if (videoFile.existsSync()) {
+        try {
+          final fileName = 'swing_${DateTime.now().millisecondsSinceEpoch}.mp4';
+          final path = '${user.id}/$fileName';
+          
+          await _supabase.storage.from('swing-videos').upload(
+            path,
+            videoFile,
+            fileOptions: const FileOptions(cacheControl: '3600', upsert: false),
+          );
+          
+          publicVideoUrl = _supabase.storage.from('swing-videos').getPublicUrl(path);
+        } catch (e) {
+          debugPrint('Error uploading video: $e');
+          // Proceed without video URL if upload fails, or handle as needed
+        }
+      }
+    }
+
     final List<Map<String, double>> dataPoints = [];
     for (int i = 0; i < leftData.length; i++) {
       dataPoints.add({
@@ -80,19 +131,23 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
     }
 
     final Map<String, dynamic> heatmapData = {
-      'leftFoot': _convert2DArrayToMap(_leftFootPressure),
-      'rightFoot': _convert2DArrayToMap(_rightFootPressure),
+      'leftFoot': _leftFootPressure,
+      'rightFoot': _rightFootPressure,
       'swingPhase': _swingPhase,
     };
 
     try {
-      await FirebaseFirestore.instance.collection('swings').add({
-        'userId': user.uid,
-        'timestamp': Timestamp.now(),
-        'dataPoints': dataPoints,
-        'heatmapData': heatmapData,
-        'swingPhase': _swingPhase,
-      });
+      final Map<String, dynamic> sessionData = {
+        'user_id': user.id,
+        'timestamp': DateTime.now().toIso8601String(),
+        'data_points': dataPoints,
+        'heatmap_data': heatmapData,
+        'swing_phase': _swingPhase,
+        'video_path': publicVideoUrl, // Use the public URL here
+      };
+
+      await _supabase.from('swings').insert(sessionData);
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -115,8 +170,20 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
     }
   }
 
-  void _simulateSwing() {
+  Future<void> _simulateSwing() async {
     if (_isSwinging) return;
+
+    // Start Video Recording
+    if (_cameraController != null && 
+        _cameraController!.value.isInitialized && 
+        !_cameraController!.value.isRecordingVideo) {
+      try {
+        await _cameraController!.startVideoRecording();
+        _isRecording = true;
+      } catch (e) {
+        debugPrint('Error starting video recording: $e');
+      }
+    }
 
     setState(() {
       _leftDataPoints = [];
@@ -137,7 +204,7 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
     _simulationTimer?.cancel();
     _simulationTimer = Timer.periodic(const Duration(milliseconds: 40), (
       timer,
-    ) {
+    ) async {
       if (!mounted) {
         timer.cancel();
         return;
@@ -164,7 +231,20 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
         if (mounted) setState(() => _swingPhase = "Saving...");
         timer.cancel();
 
-        _saveSwingSession(currentSwingL, currentSwingR);
+        String? recordedPath;
+        // Stop Video Recording
+        if (_cameraController != null && _cameraController!.value.isRecordingVideo) {
+          try {
+            final file = await _cameraController!.stopVideoRecording();
+            _isRecording = false;
+            recordedPath = file.path;
+            debugPrint('Video saved to: ${file.path}');
+          } catch (e) {
+            debugPrint('Error stopping video recording: $e');
+          }
+        }
+
+        _saveSwingSession(currentSwingL, currentSwingR, videoPath: recordedPath);
         _returnToBaseline();
         return;
       }
@@ -226,6 +306,7 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
     _simulationTimer?.cancel();
     _leftDataPoints.clear();
     _rightDataPoints.clear();
+    _cameraController?.dispose();
     super.dispose();
   }
 
@@ -240,6 +321,8 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               _buildAppBar(context),
+              const SizedBox(height: 24),
+              _buildCameraPreview(),
               const SizedBox(height: 24),
               _buildWeightCards(),
               const SizedBox(height: 24),
@@ -359,7 +442,7 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
         tooltip: 'Logout',
         color: AppColors.error,
         onPressed: () async {
-          await FirebaseAuth.instance.signOut();
+          await _supabase.auth.signOut();
           if (context.mounted) {
             Navigator.of(context).pushReplacement(
               MaterialPageRoute(builder: (context) => const AuthScreen()),
@@ -372,7 +455,7 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
 
   Widget _buildCameraPreview() {
     return Container(
-      height: 220,
+      height: 400, // Match playback screen size
       width: double.infinity,
       decoration: BoxDecoration(
         color: Colors.black,
@@ -390,24 +473,46 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
       child: Stack(
         fit: StackFit.expand,
         children: [
-          // Mock Camera Feed (Placeholder)
-          Container(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [
-                  Colors.grey[800]!,
-                  Colors.grey[900]!,
-                ],
+          // Camera Feed
+          if (_initializeControllerFuture != null)
+            FutureBuilder<void>(
+              future: _initializeControllerFuture,
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.done) {
+                  return Center(
+                    child: AspectRatio(
+                      aspectRatio: _cameraController!.value.aspectRatio,
+                      child: CameraPreview(_cameraController!),
+                    ),
+                  );
+                } else {
+                  return Container(
+                    color: Colors.black,
+                    child: const Center(
+                      child: CircularProgressIndicator(color: AppColors.primary),
+                    ),
+                  );
+                }
+              },
+            )
+          else
+            Container(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    Colors.grey[800]!,
+                    Colors.grey[900]!,
+                  ],
+                ),
+              ),
+              child: Icon(
+                Icons.videocam_off_outlined,
+                size: 64,
+                color: Colors.white.withOpacity(0.1),
               ),
             ),
-            child: Icon(
-              Icons.videocam_off_outlined,
-              size: 64,
-              color: Colors.white.withOpacity(0.1),
-            ),
-          ),
 
 
           // Status Indicators

@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:golf_force_plate/theme.dart'; // Import theme
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
@@ -26,6 +25,7 @@ class _AuthScreenState extends State<AuthScreen>
   late AnimationController _animationController;
   late Animation<double> _fadeAnimation;
   final GoogleSignIn _googleSignIn = GoogleSignIn();
+  final SupabaseClient _supabase = Supabase.instance.client;
 
   @override
   void initState() {
@@ -53,27 +53,35 @@ class _AuthScreenState extends State<AuthScreen>
     if (isValid) {
       setState(() => _isLoading = true);
       _formKey.currentState!.save();
-      UserCredential userCredential;
 
       try {
         if (_isLogin) {
-          userCredential = await FirebaseAuth.instance
-              .signInWithEmailAndPassword(
-                email: _userEmail,
-                password: _userPassword,
-              );
+          await _supabase.auth.signInWithPassword(
+            email: _userEmail,
+            password: _userPassword,
+          );
         } else {
-          userCredential = await FirebaseAuth.instance
-              .createUserWithEmailAndPassword(
-                email: _userEmail,
-                password: _userPassword,
-              );
-
-          await FirebaseFirestore.instance
-              .collection('users')
-              .doc(userCredential.user!.uid)
-              .set({'username': _userName, 'email': _userEmail});
+          final AuthResponse res = await _supabase.auth.signUp(
+            email: _userEmail,
+            password: _userPassword,
+            data: {'username': _userName},
+          );
           
+          final User? user = res.user;
+          // Optionally insert into profiles table if not handled by triggers
+          if (user != null) {
+              try {
+                await _supabase.from('profiles').upsert({
+                'id': user.id,
+                'username': _userName,
+                'email': _userEmail, // Though email is in auth.users, sometimes useful in profiles
+                'updated_at': DateTime.now().toIso8601String(),
+              });
+              } catch (e) {
+                 print('Profile creation error (might already exist): $e');
+              }
+          }
+
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
@@ -90,15 +98,11 @@ class _AuthScreenState extends State<AuthScreen>
              MaterialPageRoute(builder: (context) => const MainScreen()),
            );
         }
-      } on FirebaseAuthException catch (err) {
-        var message = 'An error occurred, please check your credentials!';
-        if (err.message != null) {
-          message = err.message!;
-        }
+      } on AuthException catch (err) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text(message),
+              content: Text(err.message),
               backgroundColor: AppColors.error,
               behavior: SnackBarBehavior.floating,
               shape: RoundedRectangleBorder(
@@ -109,6 +113,15 @@ class _AuthScreenState extends State<AuthScreen>
         }
       } catch (err) {
         print(err);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('An unexpected error occurred: $err'),
+              backgroundColor: AppColors.error,
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
       } finally {
         if (mounted) {
           setState(() => _isLoading = false);
@@ -146,23 +159,37 @@ class _AuthScreenState extends State<AuthScreen>
 
       final GoogleSignInAuthentication googleAuth =
           await googleUser.authentication;
-      final credential = GoogleAuthProvider.credential(
-        accessToken: googleAuth.accessToken,
-        idToken: googleAuth.idToken,
+      final accessToken = googleAuth.accessToken;
+      final idToken = googleAuth.idToken;
+
+      if (accessToken == null) {
+        throw 'No Access Token found.';
+      }
+      if (idToken == null) {
+        throw 'No ID Token found.';
+      }
+
+      final AuthResponse res = await _supabase.auth.signInWithIdToken(
+        provider: OAuthProvider.google,
+        idToken: idToken,
+        accessToken: accessToken,
       );
 
-      final UserCredential userCredential = await FirebaseAuth.instance
-          .signInWithCredential(credential);
+      final User? user = res.user;
 
-      if (userCredential.additionalUserInfo?.isNewUser == true) {
-        await FirebaseFirestore.instance
-            .collection('users')
-            .doc(userCredential.user!.uid)
-            .set({
-              'username': googleUser.displayName ?? 'Google User',
-              'email': googleUser.email,
-              'photoUrl': googleUser.photoUrl,
-            });
+      if (user != null) {
+          // Update profile
+             try {
+                await _supabase.from('profiles').upsert({
+                'id': user.id,
+                'username': googleUser.displayName ?? 'Google User',
+                'email': googleUser.email,
+                'avatar_url': googleUser.photoUrl,
+                'updated_at': DateTime.now().toIso8601String(),
+              });
+              } catch (e) {
+                 print('Profile update error: $e');
+              }
       }
       
       if (mounted) {
@@ -197,27 +224,27 @@ class _AuthScreenState extends State<AuthScreen>
     const demoPassword = 'demo123456';
 
     try {
-      UserCredential userCredential;
       try {
-        userCredential = await FirebaseAuth.instance.signInWithEmailAndPassword(
-          email: demoEmail,
-          password: demoPassword,
-        );
-      } catch (e) {
-        userCredential = await FirebaseAuth.instance
-            .createUserWithEmailAndPassword(
-              email: demoEmail,
-              password: demoPassword,
-            );
-
-        await FirebaseFirestore.instance
-            .collection('users')
-            .doc(userCredential.user!.uid)
-            .set({
-              'username': 'Demo User',
-              'email': demoEmail,
-              'photoUrl': null,
-            });
+        // Try login
+         await _supabase.auth.signInWithPassword(
+            email: demoEmail,
+            password: demoPassword,
+          );
+      } on AuthException catch (_) {
+         // Create if likely not found (or just try create)
+         final AuthResponse res = await _supabase.auth.signUp(
+            email: demoEmail,
+            password: demoPassword,
+            data: {'username': 'Demo User'},
+          );
+          if (res.user != null) {
+               await _supabase.from('profiles').upsert({
+                'id': res.user!.id,
+                'username': 'Demo User',
+                'email': demoEmail,
+                'updated_at': DateTime.now().toIso8601String(),
+              });
+          }
       }
 
       if (mounted) {

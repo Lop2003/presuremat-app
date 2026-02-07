@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:golf_force_plate/theme.dart';
 
 class UserProfileModal extends StatefulWidget {
@@ -20,6 +19,7 @@ class _UserProfileModalState extends State<UserProfileModal> {
   String? _selectedExperienceLevel;
   bool _isLoading = false;
   bool _isSaving = false;
+  final SupabaseClient _supabase = Supabase.instance.client;
   
   final List<String> _experienceLevels = [
     'Beginner',
@@ -37,39 +37,32 @@ class _UserProfileModalState extends State<UserProfileModal> {
   Future<void> _loadUserData() async {
     setState(() => _isLoading = true);
     
-    final user = FirebaseAuth.instance.currentUser;
+    final user = _supabase.auth.currentUser;
     if (user == null) {
       setState(() => _isLoading = false);
       return;
     }
 
     try {
-      final doc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .get();
+      final data = await _supabase
+          .from('profiles')
+          .select()
+          .eq('id', user.id)
+          .single();
 
-      if (doc.exists) {
-        final data = doc.data()!;
-        _usernameController.text = data['username'] ?? '';
-        _emailController.text = user.email ?? '';
-        _phoneController.text = data['phone'] ?? '';
-        _handicapController.text = data['handicap']?.toString() ?? '';
-        _selectedExperienceLevel = data['experienceLevel'];
-      } else {
-        _emailController.text = user.email ?? '';
-      }
+      _usernameController.text = data['username'] ?? '';
+      _emailController.text = user.email ?? '';
+      _phoneController.text = data['phone'] ?? '';
+      _handicapController.text = data['handicap']?.toString() ?? '';
+      _selectedExperienceLevel = data['experience_level']; // Note: snake_case in DB
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error loading profile: $e'),
-            backgroundColor: AppColors.error,
-          ),
-        );
-      }
+      print('Error loading profile: $e');
+      // If profile doesn't exist yet, just show email
+      _emailController.text = user.email ?? '';
     } finally {
-      setState(() => _isLoading = false);
+      if (mounted) {
+         setState(() => _isLoading = false);
+      }
     }
   }
 
@@ -78,29 +71,28 @@ class _UserProfileModalState extends State<UserProfileModal> {
 
     setState(() => _isSaving = true);
 
-    final user = FirebaseAuth.instance.currentUser;
+    final user = _supabase.auth.currentUser;
     if (user == null) {
       setState(() => _isSaving = false);
       return;
     }
 
     try {
-      final Map<String, dynamic> data = {
+      final Map<String, dynamic> updates = {
+        'id': user.id,
         'username': _usernameController.text.trim(),
         'email': user.email,
         'phone': _phoneController.text.trim(),
-        'experienceLevel': _selectedExperienceLevel,
+        'experience_level': _selectedExperienceLevel,
+        'updated_at': DateTime.now().toIso8601String(),
       };
 
       // Only add handicap if it's not empty
       if (_handicapController.text.trim().isNotEmpty) {
-        data['handicap'] = double.tryParse(_handicapController.text.trim()) ?? 0.0;
+        updates['handicap'] = double.tryParse(_handicapController.text.trim()) ?? 0.0;
       }
 
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .set(data, SetOptions(merge: true));
+      await _supabase.from('profiles').upsert(updates);
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -123,7 +115,9 @@ class _UserProfileModalState extends State<UserProfileModal> {
         );
       }
     } finally {
-      setState(() => _isSaving = false);
+      if (mounted) {
+         setState(() => _isSaving = false);
+      }
     }
   }
 
