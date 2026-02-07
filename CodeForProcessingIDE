@@ -1,0 +1,119 @@
+import processing.serial.*;
+
+Serial myPort;
+int TOTAL_SENSORS = 64; 
+int[] sensors = new int[TOTAL_SENSORS]; 
+
+// --- การตั้งค่าขนาด ---
+int cols = 5;       // กว้าง 5 ช่อง
+int cellSize = 60;  // ขนาดช่อง (ปรับให้ใหญ่ขึ้นเพราะจำนวนแถวน้อยลง)
+int spacing = 450;  // ระยะห่างระหว่างเท้าซ้าย-ขวา
+
+void setup() {
+  size(900, 600); // ปรับขนาดหน้าจอ
+  textSize(16);
+  textAlign(CENTER, CENTER);
+  
+  // เชื่อมต่อ Serial
+  try {
+    // **อย่าลืมเช็ค Index [0] ให้ตรงกับเครื่องคุณ**
+    String portName = Serial.list()[0]; 
+    myPort = new Serial(this, portName, 115200);
+    myPort.bufferUntil('\n');
+    println("Connected to: " + portName);
+  } catch (Exception e) {
+    println("Error: ไม่พบ Serial Port");
+  }
+}
+
+void draw() {
+  background(30);
+  
+  // --- วาดหัวข้อ ---
+  fill(255); textSize(24);
+  text("LEFT FOOT (0-24)", 200, 50);
+  text("RIGHT FOOT (32-56)", 200 + spacing, 50);
+  
+  // ฐานความสูง (ให้เริ่มวาดจากด้านล่างขึ้นบนที่ระดับ Y=500)
+  float baseY = 500;
+  
+  for (int i = 0; i < TOTAL_SENSORS; i++) {
+    
+    // ตัวแปรสำหรับเก็บตำแหน่งที่จะวาด
+    float x = -1000; // ค่าเริ่มต้น (ไว้นอกจอ)
+    float y = -1000;
+    
+    boolean shouldDraw = false; // ตัวเช็คว่าจะวาดไหม
+    
+    // ==========================================
+    // 1. เงื่อนไขเท้าซ้าย (0 - 24)
+    // ==========================================
+    if (i >= 0 && i <= 24) { 
+      shouldDraw = true;
+      int col = i % cols;       // 0-4
+      int row = i / cols;       // แถว 0-4
+      
+      // เริ่มที่ X=50
+      x = 50 + (col * cellSize);
+      // วาดจากล่างขึ้นบน
+      y = baseY - (row * cellSize);
+    } 
+    
+    // ==========================================
+    // 2. เงื่อนไขเท้าขวา (32 - 56)
+    // ==========================================
+    else if (i >= 32 && i <= 56) {
+      shouldDraw = true;
+      int idx = i - 32;         // รีเซ็ตให้เริ่มนับ 0 ใหม่เพื่อคำนวณแถว
+      int col = idx % cols;
+      int row = idx / cols;
+      
+      // เริ่มที่ X=50 + ระยะห่าง
+      x = 50 + spacing + (col * cellSize);
+      // วาดจากล่างขึ้นบน
+      y = baseY - (row * cellSize);
+    }
+    
+    // ==========================================
+    // การวาดกราฟิก (ถ้าเข้าเงื่อนไข)
+    // ==========================================
+    if (shouldDraw) {
+      int pressure = sensors[i];
+      
+      // Heatmap Color
+      colorMode(HSB, 360, 100, 100);
+      if (pressure < 50) {
+        fill(0, 0, 20); // สีเทา
+      } else {
+        float hueVal = map(pressure, 0, 4095, 240, 0);
+        fill(hueVal, 100, 100);
+      }
+      
+      stroke(0);
+      rect(x, y, cellSize, cellSize);
+      
+      // แสดงค่าแรงกด
+      fill(255); textSize(18);
+      text(pressure, x + cellSize/2, y + cellSize/2);
+      
+      // แสดงเลข Index มุมซ้ายบน
+      fill(200); textSize(12);
+      text(i, x + 15, y + 15);
+    }
+  }
+  
+  colorMode(RGB, 255);
+}
+
+void serialEvent(Serial myPort) {
+  try {
+    String inString = myPort.readStringUntil('\n');
+    if (inString != null) {
+      inString = trim(inString);
+      int[] temp = int(split(inString, ','));
+      if (temp.length == TOTAL_SENSORS) {
+        sensors = temp;
+      }
+    }
+  } catch (Exception e) { }
+}

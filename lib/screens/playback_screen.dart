@@ -107,23 +107,48 @@ class _PlaybackScreenState extends State<PlaybackScreen> {
             );
           }
 
-          return SingleChildScrollView(
+          return Padding(
             padding: const EdgeInsets.all(16.0),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 _buildHeader(timestamp, dataPoints.length),
-                const SizedBox(height: 20),
-                if (_hasVideo) ...[
-                   _buildVideoSection(),
-                   const SizedBox(height: 20),
-                ],
-                _buildHeatmapSection(),
-                const SizedBox(height: 20),
-                _buildChartSection(leftDataPoints, rightDataPoints),
-                const SizedBox(height: 20),
-                _buildTimelineControl(dataPoints.length),
-                const SizedBox(height: 20),
+                const SizedBox(height: 16),
+                Expanded(
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Left Column: Video & Heatmap
+                      Expanded(
+                        flex: 1, // 50% width
+                        child: Column(
+                          children: [
+                            if (_hasVideo) ...[
+                              Expanded(child: _buildVideoSection()),
+                              const SizedBox(height: 16),
+                            ],
+                            // Heatmap takes remaining space or fixed space if video is present
+                            _hasVideo 
+                                ? SizedBox(height: 250, child: _buildHeatmapSection()) 
+                                : Expanded(child: _buildHeatmapSection()),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      // Right Column: Chart & Controls
+                      Expanded(
+                        flex: 1, // 50% width
+                        child: Column(
+                          children: [
+                            Expanded(child: _buildChartSection(leftDataPoints, rightDataPoints)),
+                            const SizedBox(height: 16),
+                            _buildTimelineControl(dataPoints.length),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               ],
             ),
           );
@@ -196,9 +221,38 @@ class _PlaybackScreenState extends State<PlaybackScreen> {
        if (controller != null) {
           _videoController = controller;
           _initializeVideoPlayerFuture = _videoController!.initialize().then((_) {
-             if (mounted) setState(() => _hasVideo = true);
+             if (mounted) {
+               setState(() => _hasVideo = true);
+               _videoController!.addListener(_videoListener);
+             }
           });
        }
+    }
+  }
+
+  void _videoListener() {
+    if (_videoController != null && _videoController!.value.isInitialized) {
+      final position = _videoController!.value.position;
+      final duration = _videoController!.value.duration;
+      final isPlaying = _videoController!.value.isPlaying;
+
+      if (isPlaying != _isPlaying) {
+        if (mounted) setState(() => _isPlaying = isPlaying);
+      }
+
+      if (position <= duration) {
+        final double seconds = position.inMilliseconds / 1000.0;
+        if (mounted) {
+          setState(() {
+            _currentTime = seconds;
+            _updateHeatmapForTime(_currentTime);
+          });
+        }
+      }
+      
+      if (position >= duration && !isPlaying) {
+         if (mounted) setState(() => _isPlaying = false);
+      }
     }
   }
 
@@ -228,39 +282,40 @@ class _PlaybackScreenState extends State<PlaybackScreen> {
             ),
           ),
           const SizedBox(height: 16),
-          FutureBuilder(
-            future: _initializeVideoPlayerFuture,
-            builder: (context, snapshot) {
-              if (snapshot.connectionState == ConnectionState.done) {
-                return Container(
-                  height: 400,
-                  width: double.infinity,
-                  decoration: BoxDecoration(
-                    color: Colors.black,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(12),
-                    child: FittedBox(
-                      fit: BoxFit.contain,
-                      child: SizedBox(
-                        width: _videoController!.value.size.width,
-                        height: _videoController!.value.size.height,
-                        child: Stack(
-                          alignment: Alignment.bottomCenter,
-                          children: [
-                            VideoPlayer(_videoController!),
-                            VideoProgressIndicator(_videoController!, allowScrubbing: true),
-                          ],
+          Expanded(
+            child: FutureBuilder(
+              future: _initializeVideoPlayerFuture,
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.done) {
+                  return Container(
+                    width: double.infinity,
+                    decoration: BoxDecoration(
+                      color: Colors.black,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(12),
+                      child: FittedBox(
+                        fit: BoxFit.contain,
+                        child: SizedBox(
+                          width: _videoController!.value.size.width,
+                          height: _videoController!.value.size.height,
+                          child: Stack(
+                            alignment: Alignment.bottomCenter,
+                            children: [
+                              VideoPlayer(_videoController!),
+                              VideoProgressIndicator(_videoController!, allowScrubbing: true),
+                            ],
+                          ),
                         ),
                       ),
                     ),
-                  ),
-                );
-              } else {
-                return const Center(child: CircularProgressIndicator());
-              }
-            },
+                  );
+                } else {
+                  return const Center(child: CircularProgressIndicator());
+                }
+              },
+            ),
           ),
           const SizedBox(height: 8),
           Center(
@@ -428,7 +483,6 @@ class _PlaybackScreenState extends State<PlaybackScreen> {
 
   Widget _buildChartSection(List<FlSpot> leftDataPoints, List<FlSpot> rightDataPoints) {
     return Container(
-      height: 300,
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(20),
@@ -559,6 +613,9 @@ class _PlaybackScreenState extends State<PlaybackScreen> {
                 _currentTime = clamped;
                 _updateHeatmapForTime(_currentTime);
               });
+              if (_hasVideo && _videoController != null) {
+                _videoController!.seekTo(Duration(milliseconds: (clamped * 1000).toInt()));
+              }
             },
             activeColor: Colors.blue,
             inactiveColor: Colors.grey,
@@ -592,32 +649,45 @@ class _PlaybackScreenState extends State<PlaybackScreen> {
     );
   }
 
+  // Replace manual _startPlayback with unified logic
   void _startPlayback() {
-    setState(() => _isPlaying = true);
-    _playbackTimer = Timer.periodic(const Duration(milliseconds: 100), (timer) {
-      final maxTime = _dataPoints.isNotEmpty ? (_dataPoints.last['t'] as num).toDouble() : 0.0;
-      if (_currentTime >= maxTime) {
+    if (_hasVideo && _videoController != null) {
+      _videoController!.play();
+    } else {
+      // Fallback for no video (existing timer logic)
+      setState(() => _isPlaying = true);
+      _playbackTimer = Timer.periodic(const Duration(milliseconds: 100), (timer) {
+        final maxTime = _dataPoints.isNotEmpty ? (_dataPoints.last['t'] as num).toDouble() : 0.0;
+        if (_currentTime >= maxTime) {
+          setState(() {
+            _currentTime = maxTime;
+            _updateHeatmapForTime(_currentTime);
+          });
+          _pausePlayback();
+          return;
+        }
         setState(() {
-          _currentTime = maxTime;
+          _currentTime = (_currentTime + 0.1).clamp(0.0, maxTime);
           _updateHeatmapForTime(_currentTime);
         });
-        _pausePlayback();
-        return;
-      }
-      setState(() {
-        _currentTime = (_currentTime + 0.1).clamp(0.0, maxTime);
-        _updateHeatmapForTime(_currentTime);
       });
-    });
+    }
   }
 
   void _pausePlayback() {
-    setState(() => _isPlaying = false);
-    _playbackTimer?.cancel();
+    if (_hasVideo && _videoController != null) {
+      _videoController!.pause();
+    } else {
+      setState(() => _isPlaying = false);
+      _playbackTimer?.cancel();
+    }
   }
 
   void _resetPlayback() {
     _pausePlayback();
+    if (_hasVideo && _videoController != null) {
+      _videoController!.seekTo(Duration.zero);
+    }
     setState(() {
       _currentTime = 0.0;
       _updateHeatmapForTime(0.0);
