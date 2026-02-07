@@ -695,14 +695,14 @@ class _PlaybackScreenState extends State<PlaybackScreen> {
   }
 
   void _updateHeatmapForTime(double time) {
-    // หาข้อมูลที่ใกล้เคียงกับเวลาปัจจุบัน
+    // Find closest data point
     if (_dataPoints.isEmpty) return;
     
     int closestIndex = 0;
     double minDiff = double.infinity;
     
     for (int i = 0; i < _dataPoints.length; i++) {
-      final pointTime = _dataPoints[i]['t'] as double;
+      final pointTime = (_dataPoints[i]['t'] as num).toDouble();
       final diff = (pointTime - time).abs();
       if (diff < minDiff) {
         minDiff = diff;
@@ -710,11 +710,32 @@ class _PlaybackScreenState extends State<PlaybackScreen> {
       }
     }
     
-    // อัปเดต heatmap ตามข้อมูลที่เลือก
-    final leftWeight = _dataPoints[closestIndex]['l'] as double;
-    final rightWeight = _dataPoints[closestIndex]['r'] as double;
+    final point = _dataPoints[closestIndex];
     
-    // สร้าง heatmap ตามน้ำหนัก
+    // Check if we have real heatmap data
+    if (point.containsKey('raw_left') && point['raw_left'] != null) {
+      try {
+        _leftFootPressure = (point['raw_left'] as List).map((row) {
+          return (row as List).map((val) => (val as num).toDouble()).toList();
+        }).toList();
+        
+        _rightFootPressure = (point['raw_right'] as List).map((row) {
+          return (row as List).map((val) => (val as num).toDouble()).toList();
+        }).toList();
+      } catch (e) {
+        debugPrint('Error parsing heatmap data: $e');
+        // Fallback
+        _useGeneratedHeatmap(point);
+      }
+    } else {
+      _useGeneratedHeatmap(point);
+    }
+  }
+
+  void _useGeneratedHeatmap(Map<String, dynamic> point) {
+    final leftWeight = (point['l'] as num).toDouble();
+    final rightWeight = (point['r'] as num).toDouble();
+    
     _leftFootPressure = _generateHeatmapFromWeight(leftWeight, true);
     _rightFootPressure = _generateHeatmapFromWeight(rightWeight, false);
   }

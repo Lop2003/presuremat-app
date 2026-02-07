@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_libserialport/flutter_libserialport.dart';
+import 'dart:async';
 import 'dart:typed_data';
 import 'dart:convert';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/sensor_data_service.dart';
+import '../services/serial_service.dart';
 import 'sensor_playback_screen.dart' as playback;
 
 class SensorDisplayScreen extends StatefulWidget {
@@ -14,16 +15,17 @@ class SensorDisplayScreen extends StatefulWidget {
 }
 
 class _SensorDisplayScreenState extends State<SensorDisplayScreen> {
-  SerialPort? _port;
-  SerialPortReader? _reader;
+  // Use shared SerialService singleton
+  final SerialService _serialService = SerialService();
+  StreamSubscription<List<int>>? _dataSubscription;
+  
   List<String> _availablePorts = [];
   String? _selectedPort;
   bool _isConnected = false;
   List<SensorData> _sensorDataList = [];
-  String _rawData = '';
 
-  // เก็บข้อมูล sensor แต่ละจุด (3x3 grid)
-  List<List<int>> _sensorGrid = List.generate(3, (i) => List.filled(3, 0));
+  // Store sensor data for each point (now 8x8 grid for 64 sensors)
+  List<List<int>> _sensorGrid = List.generate(8, (i) => List.filled(8, 0));
 
   // Database related variables
   final SensorDataService _sensorDataService = SensorDataService();
@@ -36,64 +38,53 @@ class _SensorDisplayScreenState extends State<SensorDisplayScreen> {
   void initState() {
     super.initState();
     _refreshPorts();
+    _restoreConnection();
+  }
+  
+  void _restoreConnection() {
+    // Restore connection state from singleton
+    if (_serialService.isConnected) {
+      setState(() {
+        _isConnected = true;
+        _selectedPort = _serialService.connectedPort;
+      });
+      _subscribeToData();
+    }
+  }
+  
+  void _subscribeToData() {
+    _dataSubscription?.cancel();
+    _dataSubscription = _serialService.dataStream.listen(_handleSensorData);
   }
 
   @override
   void dispose() {
-    _disconnectFromPort();
+    _dataSubscription?.cancel(); // Only cancel subscription, don't disconnect
     super.dispose();
   }
 
   void _refreshPorts() {
     setState(() {
-      _availablePorts = SerialPort.availablePorts;
+      _availablePorts = _serialService.getAvailablePorts();
     });
   }
 
-  void _connectToPort() async {
+  Future<void> _connectToPort() async {
     if (_selectedPort == null) return;
 
     try {
-      _port = SerialPort(_selectedPort!);
+      await _serialService.connect(_selectedPort!);
+      
+      setState(() {
+        _isConnected = true;
+      });
+      
+      _subscribeToData();
 
-      // กำหนดค่า Serial port
-      final config = SerialPortConfig()
-        ..baudRate = 115200
-        ..bits = 8
-        ..parity = SerialPortParity.none
-        ..stopBits = 1
-        ..setFlowControl(SerialPortFlowControl.none);
-
-      _port!.config = config;
-
-      if (_port!.openReadWrite()) {
-        _reader = SerialPortReader(_port!);
-
-        // เริ่มอ่านข้อมูลจาก Serial port
-        _reader!.stream.listen(
-          (data) {
-            _handleSerialData(data);
-          },
-          onError: (error) {
-            print('Serial read error: $error');
-          },
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('เชื่อมต่อกับ $_selectedPort สำเร็จ')),
         );
-
-        setState(() {
-          _isConnected = true;
-        });
-
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('เชื่อมต่อกับ $_selectedPort สำเร็จ')),
-          );
-        }
-      } else {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('ไม่สามารถเปิด Serial port ได้')),
-          );
-        }
       }
     } catch (e) {
       if (mounted) {
@@ -104,23 +95,70 @@ class _SensorDisplayScreenState extends State<SensorDisplayScreen> {
     }
   }
 
-  void _disconnectFromPort() async {
+  Future<void> _disconnectFromPort() async {
     // หยุดการบันทึกก่อนถ้ากำลังบันทึกอยู่
     if (_isRecording) {
       await _stopRecording();
     }
 
-    _reader?.close();
-    _port?.close();
+    _dataSubscription?.cancel();
+    await _serialService.disconnect();
 
     // ตรวจสอบว่า widget ยังไม่ถูก dispose
     if (mounted) {
       setState(() {
         _isConnected = false;
         _sensorDataList.clear();
-        _rawData = '';
-        _sensorGrid = List.generate(3, (i) => List.filled(3, 0));
+        _sensorGrid = List.generate(8, (i) => List.filled(8, 0));
       });
+    }
+  }
+  
+  // Handle incoming 64-sensor data from SerialService
+  void _handleSensorData(List<int> sensors) {
+    if (!mounted) return;
+    
+    setState(() {
+      // Update 8x8 grid (64 sensors)
+      for (int i = 0; i < 8 && i < sensors.length ~/ 8; i++) {
+        for (int j = 0; j < 8; j++) {
+          int index = i * 8 + j;
+          if (index < sensors.length) {
+            _sensorGrid[i][j] = sensors[index];
+          }
+        }
+      }
+      
+      // Add to data list for display
+      final timestamp = DateTime.now();
+      // Just log total pressure for real-time view
+      int totalPressure = sensors.fold(0, (sum, val) => sum + val);
+      _sensorDataList.insert(
+        0,
+        SensorData(row: 0, col: 0, value: totalPressure, timestamp: timestamp),
+      );
+      
+      if (_sensorDataList.length > 100) {
+        _sensorDataList.removeRange(100, _sensorDataList.length);
+      }
+    });
+    
+    // Record if recording is active
+    if (_isRecording && _currentSessionId != null) {
+      // For now, just record summary data
+      _pendingSensorReadings.add(
+        SensorReading(
+          row: 0,
+          col: 0,
+          value: sensors.fold(0, (sum, val) => sum + val),
+          timestamp: DateTime.now(),
+          sessionId: _currentSessionId!,
+        ),
+      );
+      
+      if (_pendingSensorReadings.length >= 10) {
+        _savePendingReadings();
+      }
     }
   }
 
@@ -201,72 +239,7 @@ class _SensorDisplayScreenState extends State<SensorDisplayScreen> {
     }
   }
 
-  void _handleSerialData(Uint8List data) {
-    String dataString = utf8.decode(data);
-    _rawData += dataString;
-
-    // แยกข้อมูลตาม newline
-    List<String> lines = _rawData.split('\n');
-    _rawData = lines.last; // เก็บข้อมูลที่ยังไม่สมบูรณ์
-
-    for (int i = 0; i < lines.length - 1; i++) {
-      String line = lines[i].trim();
-      if (line.isNotEmpty) {
-        _parseSensorData(line);
-      }
-    }
-  }
-
-  void _parseSensorData(String line) {
-    try {
-      // คาดหวังข้อมูลในรูปแบบ "row,col,value"
-      List<String> parts = line.split(',');
-      if (parts.length == 3) {
-        int row = int.parse(parts[0]);
-        int col = int.parse(parts[1]);
-        int value = int.parse(parts[2]);
-        DateTime timestamp = DateTime.now();
-
-        setState(() {
-          // อัพเดทข้อมูลใน grid
-          if (row >= 0 && row < 3 && col >= 0 && col < 3) {
-            _sensorGrid[row][col] = value;
-          }
-
-          // เพิ่มข้อมูลใหม่ลงในรายการ
-          _sensorDataList.insert(
-            0,
-            SensorData(row: row, col: col, value: value, timestamp: timestamp),
-          );
-
-          // เก็บข้อมูลเฉพาะ 100 รายการล่าสุด
-          if (_sensorDataList.length > 100) {
-            _sensorDataList.removeRange(100, _sensorDataList.length);
-          }
-        });
-
-        // บันทึกลง database ถ้ากำลังบันทึกอยู่
-        if (_isRecording && _currentSessionId != null) {
-          _pendingSensorReadings.add(
-            SensorReading(
-              row: row,
-              col: col,
-              value: value,
-              timestamp: timestamp,
-              sessionId: _currentSessionId!,
-            ),
-          );
-
-          // บันทึกข้อมูลทีละ batch (ทุกๆ 10 readings)
-          if (_pendingSensorReadings.length >= 10) {
-            _savePendingReadings();
-          }
-        }
-      }
-    } catch (e) {
-      print('Error parsing sensor data: $e');
-    }
-  }
+  // Old methods removed - now using _handleSensorData(List<int>) from SerialService stream
 
   // บันทึกข้อมูลที่ค้างอยู่ลง database
   Future<void> _savePendingReadings() async {
@@ -593,7 +566,7 @@ class _SensorDisplayScreenState extends State<SensorDisplayScreen> {
             // ส่วนแสดง Sensor Grid
             if (_isConnected) ...[
               Text(
-                'Sensor Grid (3x3)',
+                'Sensor Grid (8x8)',
                 style: Theme.of(context).textTheme.titleLarge,
               ),
               const SizedBox(height: 16),
@@ -607,40 +580,30 @@ class _SensorDisplayScreenState extends State<SensorDisplayScreen> {
                       physics: const NeverScrollableScrollPhysics(),
                       gridDelegate:
                           const SliverGridDelegateWithFixedCrossAxisCount(
-                            crossAxisCount: 3,
-                            crossAxisSpacing: 4,
-                            mainAxisSpacing: 4,
+                            crossAxisCount: 8,
+                            crossAxisSpacing: 2,
+                            mainAxisSpacing: 2,
                           ),
-                      itemCount: 9,
+                      itemCount: 64,
                       itemBuilder: (context, index) {
-                        int row = index ~/ 3;
-                        int col = index % 3;
+                        int row = index ~/ 8;
+                        int col = index % 8;
                         int value = _sensorGrid[row][col];
 
                         return Container(
                           decoration: BoxDecoration(
                             color: _getColorFromValue(value),
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: Colors.grey),
+                            borderRadius: BorderRadius.circular(4),
                           ),
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Text(
-                                '($row,$col)',
-                                style: const TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.bold,
-                                ),
+                          child: Center(
+                            child: Text(
+                              value.toString(),
+                              style: const TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold,
                               ),
-                              Text(
-                                value.toString(),
-                                style: const TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ],
+                              overflow: TextOverflow.ellipsis,
+                            ),
                           ),
                         );
                       },

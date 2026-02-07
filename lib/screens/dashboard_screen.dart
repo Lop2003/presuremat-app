@@ -12,6 +12,8 @@ import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
 import 'dart:io';
 
+import 'package:golf_force_plate/services/serial_service.dart'; // Import SerialService
+
 class PresentationDashboard extends StatefulWidget {
   const PresentationDashboard({super.key});
 
@@ -43,12 +45,34 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
 
   final SupabaseClient _supabase = Supabase.instance.client;
 
+  // Serial Port
+  final SerialService _serialService = SerialService();
+  List<String> _availablePorts = [];
+  String? _selectedPort;
+  bool _isSerialConnected = false;
+  StreamSubscription<List<int>>? _serialSubscription;
+  
+  // Real-time recording buffer
+  List<Map<String, dynamic>> _recordedDataBuffer = [];
+
   @override
   void initState() {
     super.initState();
     _initializeGraphWithBaseline();
     _initializeHeatmapData();
     _initializeCamera();
+    _restoreSerialConnection();
+  }
+  
+  void _restoreSerialConnection() {
+    // Check if singleton is already connected
+    if (_serialService.isConnected) {
+      _isSerialConnected = true;
+      _selectedPort = _serialService.connectedPort;
+      // Subscribe to data stream
+      _serialSubscription?.cancel();
+      _serialSubscription = _serialService.dataStream.listen(_processSerialData);
+    }
   }
 
   Future<void> _initializeCamera() async {
@@ -95,6 +119,7 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
     List<FlSpot> leftData,
     List<FlSpot> rightData, {
     String? videoPath,
+    List<Map<String, dynamic>>? recordedData,
   }) async {
     final user = _supabase.auth.currentUser;
     if (user == null) return;
@@ -116,18 +141,23 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
           publicVideoUrl = _supabase.storage.from('swing-videos').getPublicUrl(path);
         } catch (e) {
           debugPrint('Error uploading video: $e');
-          // Proceed without video URL if upload fails, or handle as needed
         }
       }
     }
 
-    final List<Map<String, double>> dataPoints = [];
-    for (int i = 0; i < leftData.length; i++) {
-      dataPoints.add({
-        't': leftData[i].x,
-        'l': leftData[i].y,
-        'r': rightData[i].y,
-      });
+    final List<Map<String, dynamic>> dataPointsToSave;
+
+    if (recordedData != null && recordedData.isNotEmpty) {
+       dataPointsToSave = recordedData;
+    } else {
+       dataPointsToSave = [];
+       for (int i = 0; i < leftData.length; i++) {
+         dataPointsToSave.add({
+           't': leftData[i].x,
+           'l': leftData[i].y,
+           'r': rightData[i].y,
+         });
+       }
     }
 
     final Map<String, dynamic> heatmapData = {
@@ -140,10 +170,10 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
       final Map<String, dynamic> sessionData = {
         'user_id': user.id,
         'timestamp': DateTime.now().toIso8601String(),
-        'data_points': dataPoints,
+        'data_points': dataPointsToSave,
         'heatmap_data': heatmapData,
         'swing_phase': _swingPhase,
-        'video_path': publicVideoUrl, // Use the public URL here
+        'video_path': publicVideoUrl,
       };
 
       await _supabase.from('swings').insert(sessionData);
@@ -170,7 +200,7 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
     }
   }
 
-  Future<void> _simulateSwing() async {
+  Future<void> _handleRecordButtonPress() async {
     if (_isSwinging) return;
 
     // Start Video Recording
@@ -188,11 +218,39 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
     setState(() {
       _leftDataPoints = [];
       _rightDataPoints = [];
+      _recordedDataBuffer = [];
       _graphXValue = 0;
       _isSwinging = true;
-      _swingPhase = "Backswing";
+      _swingPhase = _isSerialConnected ? "Recording..." : "Backswing";
     });
 
+    if (_isSerialConnected) {
+       // Real Recording Path
+       Future.delayed(const Duration(seconds: 4), () async {
+          if (!mounted) return;
+          
+          _isRecording = false;
+          _isSwinging = false;
+          setState(() => _swingPhase = "Saving...");
+
+          String? recordedPath;
+          if (_cameraController != null && _cameraController!.value.isRecordingVideo) {
+            try {
+              final file = await _cameraController!.stopVideoRecording();
+              recordedPath = file.path;
+            } catch (e) {
+              debugPrint('Error stopping video recording: $e');
+            }
+          }
+
+          // Use buffered data
+          await _saveSwingSession([], [], videoPath: recordedPath, recordedData: List.from(_recordedDataBuffer));
+          _returnToBaseline();
+       });
+       return;
+    }
+
+    // Simulation Path
     final List<FlSpot> currentSwingL = [];
     final List<FlSpot> currentSwingR = [];
     double swingTime = 0.0;
@@ -301,12 +359,213 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
     });
   }
 
+  void _initSerial() {
+    setState(() {
+      _availablePorts = _serialService.getAvailablePorts();
+    });
+  }
+
+  void _showConnectionDialog() {
+    _initSerial(); // Refresh ports
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Connect to Sensor Board'),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (_availablePorts.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.all(16.0),
+                  child: Text('No serial ports found.'),
+                )
+              else
+                ..._availablePorts.map((port) => ListTile(
+                      title: Text(port),
+                      leading: const Icon(Icons.usb),
+                      trailing: _selectedPort == port && _isSerialConnected
+                          ? const Icon(Icons.check_circle, color: Colors.green)
+                          : null,
+                      onTap: () {
+                        Navigator.pop(context);
+                        _connectToPort(port);
+                      },
+                    )),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          if (_isSerialConnected)
+            TextButton(
+              onPressed: () {
+                Navigator.pop(context);
+                _disconnectFromPort();
+              },
+              child: const Text('Disconnect', style: TextStyle(color: Colors.red)),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _connectToPort(String portName) async {
+    try {
+      await _serialService.connect(portName);
+      setState(() {
+        _selectedPort = portName;
+        _isSerialConnected = true;
+      });
+      
+      _serialSubscription?.cancel();
+      _serialSubscription = _serialService.dataStream.listen(_processSerialData);
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Connected to $portName')),
+        );
+      }
+    } catch (e) {
+      debugPrint('Error connecting to port: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Connection failed: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
+  Future<void> _disconnectFromPort() async {
+    await _serialService.disconnect();
+    _serialSubscription?.cancel();
+    setState(() {
+      _isSerialConnected = false;
+      _selectedPort = null;
+    });
+  }
+
+  void _processSerialData(List<int> sensors) {
+    if (!mounted) return;
+
+    // Map sensors to 5x5 grids (raw)
+    // Left Foot: 0-24
+    final leftGrid5x5 = _mapTo5x5Grid(sensors, 0);
+    // Right Foot: 32-56
+    final rightGrid5x5 = _mapTo5x5Grid(sensors, 32);
+
+    // Calculate total pressure
+    double leftTotal = 0;
+    double rightTotal = 0;
+
+    for(var row in leftGrid5x5) {
+      for(var val in row) leftTotal += val;
+    }
+    for(var row in rightGrid5x5) {
+      for(var val in row) rightTotal += val;
+    }
+
+    double total = leftTotal + rightTotal;
+    double leftPercent = total > 0 ? (leftTotal / total) * 100 : 50.0;
+    double rightPercent = total > 0 ? (rightTotal / total) * 100 : 50.0;
+    
+    // Scale 5x5 to 10x6 for FootHeatmap display
+    final leftGridDisplay = _scaleTo10x6(leftGrid5x5);
+    final rightGridDisplay = _scaleTo10x6(rightGrid5x5);
+
+    _updateDataFromSerial(leftPercent, rightPercent, leftGridDisplay, rightGridDisplay);
+    
+    // If recording, buffer the data
+    if (_isRecording) {
+      _recordedDataBuffer.add({
+        't': DateTime.now().millisecondsSinceEpoch, // temporary timestamp
+        'l': leftPercent,
+        'r': rightPercent,
+        'raw_left': leftGrid5x5,
+        'raw_right': rightGrid5x5,
+      });
+    }
+  }
+
+  List<List<double>> _mapTo5x5Grid(List<int> sensors, int startIndex) {
+    List<List<double>> grid = [];
+    for (int i = 0; i < 5; i++) {
+      List<double> row = [];
+      for (int j = 0; j < 5; j++) {
+        // Index calculation: startIndex + (row * 5) + col
+        int index = startIndex + (i * 5) + j;
+        if (index < sensors.length) {
+          row.add(sensors[index].toDouble());
+        } else {
+          row.add(0.0);
+        }
+      }
+      grid.add(row);
+    }
+    return grid;
+  }
+  
+  // Scale 5x5 raw grid to 10x6 display grid (normalized to 0-100)
+  List<List<double>> _scaleTo10x6(List<List<double>> grid5x5) {
+    const int targetRows = 10;
+    const int targetCols = 6;
+    const double maxRawValue = 4095.0; // ESP32 ADC max
+    
+    List<List<double>> result = List.generate(targetRows, (_) => List.filled(targetCols, 0.0));
+    
+    for (int y = 0; y < targetRows; y++) {
+      for (int x = 0; x < targetCols; x++) {
+        // Map display coordinates back to source 5x5 grid
+        double srcY = y / (targetRows - 1) * 4; // Map 0-9 to 0-4
+        double srcX = x / (targetCols - 1) * 4; // Map 0-5 to 0-4
+        
+        // Nearest neighbor interpolation
+        int nearestY = srcY.round().clamp(0, 4);
+        int nearestX = srcX.round().clamp(0, 4);
+        
+        double rawValue = grid5x5[nearestY][nearestX];
+        // Normalize to 0-100
+        result[y][x] = (rawValue / maxRawValue * 100.0).clamp(0.0, 100.0);
+      }
+    }
+    
+    return result;
+  }
+  
+  void _updateDataFromSerial(double left, double right, List<List<double>> leftHeatmap, List<List<double>> rightHeatmap) {
+      setState(() {
+        _leftWeightPercent = left;
+        _rightWeightPercent = right;
+
+        _graphXValue += 0.04; // Approximate 25Hz or use real time diff
+
+        if (_leftDataPoints.length > 50) {
+          _leftDataPoints.removeAt(0);
+          _rightDataPoints.removeAt(0);
+        }
+
+        _leftDataPoints.add(FlSpot(_graphXValue, left));
+        _rightDataPoints.add(FlSpot(_graphXValue, right));
+
+        _leftFootPressure = leftHeatmap;
+        _rightFootPressure = rightHeatmap;
+        
+        // Simple swing phase detection based on weight shift (optional)
+        // _detectSwingPhase(left, right);
+      });
+  }
+
   @override
   void dispose() {
     _simulationTimer?.cancel();
     _leftDataPoints.clear();
     _rightDataPoints.clear();
     _cameraController?.dispose();
+    _serialSubscription?.cancel(); // Cancel subscription but don't dispose singleton
     super.dispose();
   }
 
@@ -422,6 +681,13 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
 
   Widget _buildActionButtons(BuildContext context) => Row(
     children: [
+      _buildIconButton(
+        icon: Icons.usb,
+        tooltip: _isSerialConnected ? 'Connected: $_selectedPort' : 'Connect Device',
+        color: _isSerialConnected ? Colors.green : null,
+        onPressed: _showConnectionDialog,
+      ),
+      const SizedBox(width: 8),
       _buildIconButton(
         icon: Icons.sensors,
         tooltip: 'Sensor Display',
@@ -866,7 +1132,7 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
       width: double.infinity,
       height: 64,
       child: ElevatedButton.icon(
-        onPressed: _isSwinging ? null : _simulateSwing,
+        onPressed: _isSwinging ? null : _handleRecordButtonPress,
         icon: AnimatedSwitcher(
           duration: const Duration(milliseconds: 300),
           child: Icon(
