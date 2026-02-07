@@ -785,14 +785,19 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
             color: AppColors.backgroundDark,
             borderRadius: BorderRadius.circular(12),
           ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-            children: [
-              _buildHeatmapLegendItem('Low', Colors.blue),
-              _buildHeatmapLegendItem('Medium', Colors.yellow),
-              _buildHeatmapLegendItem('High', Colors.orange),
-              _buildHeatmapLegendItem('Max', Colors.red),
-            ],
+          child: FittedBox(
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                _buildHeatmapLegendItem('Low', Colors.blue),
+                const SizedBox(width: 12),
+                _buildHeatmapLegendItem('Medium', Colors.yellow),
+                const SizedBox(width: 12),
+                _buildHeatmapLegendItem('High', Colors.orange),
+                const SizedBox(width: 12),
+                _buildHeatmapLegendItem('Max', Colors.red),
+              ],
+            ),
           ),
         ),
       ],
