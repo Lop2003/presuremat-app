@@ -540,10 +540,9 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
     if (!mounted) return;
 
     // Map sensors to 5x5 grids (raw values 0-4095)
-    // Left Foot: 0-24
-    final leftGrid5x5 = _mapTo5x5Grid(sensors, 0);
-    // Right Foot: 32-56
-    final rightGrid5x5 = _mapTo5x5Grid(sensors, 32);
+    // Swapped: Left Foot uses sensors 32-56, Right Foot uses sensors 0-24
+    final leftGrid5x5 = _mapTo5x5Grid(sensors, 32);
+    final rightGrid5x5 = _mapTo5x5Grid(sensors, 0);
 
     // Calculate total force for each foot
     double leftTotal = 0;
