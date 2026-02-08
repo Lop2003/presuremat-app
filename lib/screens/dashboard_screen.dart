@@ -250,7 +250,17 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
 
           // Use buffered data
           await _saveSwingSession([], [], videoPath: recordedPath, recordedData: List.from(_recordedDataBuffer));
-          _returnToBaseline();
+          
+          // Reset graph but keep serial streaming (don't call _returnToBaseline)
+          if (mounted) {
+            setState(() {
+              _swingPhase = "Ready";
+              _leftDataPoints = [];
+              _rightDataPoints = [];
+              _totalForceDataPoints = [];
+              _graphXValue = 0;
+            });
+          }
        });
        return;
     }
@@ -1262,6 +1272,7 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
 
   LineChartData _buildChartData() {
     return LineChartData(
+      clipData: const FlClipData.all(), // Clip chart content to prevent overflow
       gridData: FlGridData(
         show: true,
         drawVerticalLine: false,
@@ -1321,8 +1332,8 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
         ),
       ),
       borderData: FlBorderData(show: false),
-      minX: _graphXValue - 2,
-      maxX: _graphXValue,
+      minX: (_graphXValue - 2).clamp(0, double.infinity),
+      maxX: _graphXValue < 2 ? 2 : _graphXValue,
       minY: 0,
       maxY: 100,
       lineBarsData: [
@@ -1342,8 +1353,10 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
   }
 
   LineChartBarData _createLineChartBarData(List<FlSpot> spots, Color color) {
+    // Prevent empty list which causes chart overflow
+    final safeSpots = spots.isEmpty ? [FlSpot(0, 50)] : spots;
     return LineChartBarData(
-      spots: spots,
+      spots: safeSpots,
       isCurved: true,
       color: color,
       barWidth: 3,
