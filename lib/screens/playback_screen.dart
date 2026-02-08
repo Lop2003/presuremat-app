@@ -92,16 +92,28 @@ class _PlaybackScreenState extends State<PlaybackScreen> {
           // แปลงข้อมูลให้อยู่ในรูปแบบ FlSpot สำหรับกราฟ
           final List<FlSpot> leftDataPoints = [];
           final List<FlSpot> rightDataPoints = [];
+          
+          // Detect if timestamps are absolute (milliseconds since epoch) or relative
+          final firstTime = dataPoints.isNotEmpty ? (dataPoints.first['t'] as num).toDouble() : 0.0;
+          final isAbsoluteTimestamp = firstTime > 1000000; // Likely epoch milliseconds
+          final baseTime = isAbsoluteTimestamp ? firstTime : 0.0;
+          
           for (var point in dataPoints) {
+            final rawTime = (point['t'] as num).toDouble();
+            // Convert to relative seconds from start
+            final relativeTime = isAbsoluteTimestamp 
+                ? (rawTime - baseTime) / 1000.0 // Convert ms to seconds
+                : rawTime;
+            
             leftDataPoints.add(
               FlSpot(
-                (point['t'] as num).toDouble(),
+                relativeTime,
                 (point['l'] as num).toDouble(),
               ),
             );
             rightDataPoints.add(
               FlSpot(
-                (point['t'] as num).toDouble(),
+                relativeTime,
                 (point['r'] as num).toDouble(),
               ),
             );
