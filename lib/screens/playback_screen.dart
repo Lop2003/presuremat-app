@@ -590,7 +590,19 @@ class _PlaybackScreenState extends State<PlaybackScreen> {
   }
 
   Widget _buildTimelineControl(int totalDataPoints) {
-    final maxTime = _dataPoints.isNotEmpty ? (_dataPoints.last['t'] as num).toDouble() : 0.0;
+    // Calculate maxTime in relative seconds (matching chart X-axis conversion)
+    double maxTime = 0.0;
+    if (_dataPoints.isNotEmpty) {
+      final firstTime = (_dataPoints.first['t'] as num).toDouble();
+      final lastTime = (_dataPoints.last['t'] as num).toDouble();
+      final isAbsoluteTimestamp = firstTime > 1000000; // Epoch milliseconds
+      
+      if (isAbsoluteTimestamp) {
+        maxTime = (lastTime - firstTime) / 1000.0; // Convert ms to seconds
+      } else {
+        maxTime = lastTime; // Already relative seconds
+      }
+    }
     
     return Container(
       padding: const EdgeInsets.all(20),
@@ -640,10 +652,13 @@ class _PlaybackScreenState extends State<PlaybackScreen> {
             max: maxTime <= 0 ? 0.0 : maxTime,
             onChanged: (value) {
               final clamped = value.clamp(0.0, maxTime);
+              // Update heatmap data first
+              _updateHeatmapForTime(clamped);
+              // Then trigger rebuild with new time and heatmap data
               setState(() {
                 _currentTime = clamped;
-                _updateHeatmapForTime(_currentTime);
               });
+              // Seek video if available
               if (_hasVideo && _videoController != null) {
                 _videoController!.seekTo(Duration(milliseconds: (clamped * 1000).toInt()));
               }
@@ -688,18 +703,29 @@ class _PlaybackScreenState extends State<PlaybackScreen> {
       // Fallback for no video (existing timer logic)
       setState(() => _isPlaying = true);
       _playbackTimer = Timer.periodic(const Duration(milliseconds: 100), (timer) {
-        final maxTime = _dataPoints.isNotEmpty ? (_dataPoints.last['t'] as num).toDouble() : 0.0;
+        // Calculate maxTime in relative seconds
+        double maxTime = 0.0;
+        if (_dataPoints.isNotEmpty) {
+          final firstTime = (_dataPoints.first['t'] as num).toDouble();
+          final lastTime = (_dataPoints.last['t'] as num).toDouble();
+          if (firstTime > 1000000) {
+            maxTime = (lastTime - firstTime) / 1000.0;
+          } else {
+            maxTime = lastTime;
+          }
+        }
+        
         if (_currentTime >= maxTime) {
+          _updateHeatmapForTime(_currentTime);
           setState(() {
             _currentTime = maxTime;
-            _updateHeatmapForTime(_currentTime);
           });
           _pausePlayback();
           return;
         }
+        _updateHeatmapForTime(_currentTime + 0.1);
         setState(() {
           _currentTime = (_currentTime + 0.1).clamp(0.0, maxTime);
-          _updateHeatmapForTime(_currentTime);
         });
       });
     }
@@ -737,9 +763,10 @@ class _PlaybackScreenState extends State<PlaybackScreen> {
     
     if (firstTime > 1000000) {
       // Absolute timestamps (milliseconds since epoch) - use proportional index
-      // Map video time (seconds) to data point index
-      final videoDuration = _videoController?.value.duration.inSeconds.toDouble() ?? 4.0;
-      final proportion = (time / videoDuration).clamp(0.0, 1.0);
+      // Calculate data duration in seconds
+      final dataDurationSec = (lastTime - firstTime) / 1000.0;
+      final safeDuration = dataDurationSec > 0 ? dataDurationSec : 1.0;
+      final proportion = (time / safeDuration).clamp(0.0, 1.0);
       closestIndex = (proportion * (_dataPoints.length - 1)).round().clamp(0, _dataPoints.length - 1);
     } else {
       // Relative time values - use original matching logic
