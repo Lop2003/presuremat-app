@@ -408,6 +408,7 @@ class _PlaybackScreenState extends State<PlaybackScreen> {
         ],
       ),
       child: Column(
+        mainAxisSize: MainAxisSize.min, // Prevent overflow
         children: [
           Row(
             children: [
@@ -443,10 +444,10 @@ class _PlaybackScreenState extends State<PlaybackScreen> {
               ),
             ],
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 8),
           // Using SimpleGridHeatmap - simple 5x5 grids
           SizedBox(
-            height: 180,
+            height: 140,
             child: Row(
               children: [
                 Expanded(
