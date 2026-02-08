@@ -62,6 +62,11 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
   
   // Real-time recording buffer
   List<Map<String, dynamic>> _recordedDataBuffer = [];
+  
+  // Auto-recording based on pressure detection
+  bool _autoRecordEnabled = true;       // Auto-record mode enabled
+  int _lowForceCounter = 0;             // Count frames below threshold
+  static const int _stopDelay = 15;     // Frames to wait before auto-stop (~1.5 sec at 100ms)
 
   @override
   void initState() {
@@ -346,6 +351,74 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
     });
   }
 
+  /// Auto-start recording when person steps on mat
+  Future<void> _startAutoRecording() async {
+    if (!mounted) return;
+    
+    setState(() {
+      _isRecording = true;
+      _isSwinging = true;
+      _swingPhase = "AUTO Recording...";
+      _recordedDataBuffer = [];
+      _leftDataPoints = [];
+      _rightDataPoints = [];
+      _totalForceDataPoints = [];
+      _graphXValue = 0;
+      _lowForceCounter = 0;
+    });
+    
+    // Start video recording
+    if (_cameraController != null && 
+        _cameraController!.value.isInitialized && 
+        !_cameraController!.value.isRecordingVideo) {
+      try {
+        await _cameraController!.startVideoRecording();
+      } catch (e) {
+        debugPrint('Error starting video recording: $e');
+      }
+    }
+    
+    debugPrint('Auto-recording started');
+  }
+
+  /// Auto-stop recording when person steps off mat
+  Future<void> _stopAutoRecording() async {
+    if (!mounted) return;
+    
+    setState(() {
+      _isRecording = false;
+      _isSwinging = false;
+      _swingPhase = "Saving...";
+    });
+    
+    String? recordedPath;
+    
+    // Stop video recording
+    if (_cameraController != null && _cameraController!.value.isRecordingVideo) {
+      try {
+        final file = await _cameraController!.stopVideoRecording();
+        recordedPath = file.path;
+      } catch (e) {
+        debugPrint('Error stopping video recording: $e');
+      }
+    }
+    
+    // Save the recorded data
+    if (_recordedDataBuffer.isNotEmpty) {
+      await _saveSwingSession([], [], videoPath: recordedPath, recordedData: List.from(_recordedDataBuffer));
+    }
+    
+    // Reset state
+    if (mounted) {
+      setState(() {
+        _swingPhase = "Ready";
+        _lowForceCounter = 0;
+      });
+    }
+    
+    debugPrint('Auto-recording stopped, saved ${_recordedDataBuffer.length} data points');
+  }
+
   void _updateData(double left, double right) {
     if (!mounted) return;
 
@@ -512,6 +585,31 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
     ).toList();
 
     _updateDataFromSerial(leftPercent, rightPercent, leftGridDisplay, rightGridDisplay, totalSystemForce);
+    
+    // Auto-recording logic
+    if (_autoRecordEnabled && _isSerialConnected) {
+      final bool forceAboveThreshold = totalSystemForce > _forceThreshold;
+      
+      if (forceAboveThreshold) {
+        // Person is standing on mat
+        _lowForceCounter = 0; // Reset counter
+        
+        if (!_isRecording && !_isSwinging) {
+          // Auto-start recording
+          _startAutoRecording();
+        }
+      } else {
+        // Force below threshold
+        if (_isRecording) {
+          _lowForceCounter++;
+          
+          if (_lowForceCounter >= _stopDelay) {
+            // Auto-stop recording after delay
+            _stopAutoRecording();
+          }
+        }
+      }
+    }
     
     // If recording, buffer the data
     if (_isRecording) {
@@ -1225,50 +1323,106 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
     return result;
   }
 
-  Widget _buildRecordButton() => Container(
-    decoration: BoxDecoration(
-      borderRadius: BorderRadius.circular(30),
-      boxShadow: [
-        BoxShadow(
-          color: (_isSwinging ? AppColors.surfaceLight : AppColors.primary).withOpacity(0.3),
-          blurRadius: 20,
-          spreadRadius: 0,
-          offset: const Offset(0, 8),
+  Widget _buildRecordButton() {
+    // When connected to serial: show auto-record status
+    if (_isSerialConnected && _autoRecordEnabled) {
+      return Container(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(30),
+          boxShadow: [
+            BoxShadow(
+              color: (_isRecording ? Colors.red : Colors.green).withOpacity(0.3),
+              blurRadius: 20,
+              spreadRadius: 0,
+              offset: const Offset(0, 8),
+            ),
+          ],
         ),
-      ],
-    ),
-    child: SizedBox(
-      width: double.infinity,
-      height: 64,
-      child: ElevatedButton.icon(
-        onPressed: _isSwinging ? null : _handleRecordButtonPress,
-        icon: AnimatedSwitcher(
-          duration: const Duration(milliseconds: 300),
-          child: Icon(
-            _isSwinging ? Icons.hourglass_top : Icons.play_circle_fill,
-            size: 28,
-            key: ValueKey(_isSwinging),
+        child: SizedBox(
+          width: double.infinity,
+          height: 64,
+          child: Container(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(30),
+              color: _isRecording ? Colors.red.shade800 : const Color(0xFF1F2937),
+              border: Border.all(
+                color: _isRecording ? Colors.red : Colors.green,
+                width: 2,
+              ),
+            ),
+            child: Center(
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    _isRecording ? Icons.fiber_manual_record : Icons.sensors,
+                    color: _isRecording ? Colors.red.shade200 : Colors.green,
+                    size: 24,
+                  ),
+                  const SizedBox(width: 12),
+                  Text(
+                    _isRecording ? 'AUTO RECORDING...' : 'AUTO • Step on mat to record',
+                    style: TextStyle(
+                      color: _isRecording ? Colors.white : Colors.grey.shade300,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
         ),
-        label: Text(
-          _isSwinging ? 'RECORDING SWING...' : 'START RECORDING',
-          style: const TextStyle(
-            fontSize: 16,
-            fontWeight: FontWeight.w800,
-            letterSpacing: 1,
+      );
+    }
+    
+    // Demo mode: manual record button
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(30),
+        boxShadow: [
+          BoxShadow(
+            color: (_isSwinging ? AppColors.surfaceLight : AppColors.primary).withOpacity(0.3),
+            blurRadius: 20,
+            spreadRadius: 0,
+            offset: const Offset(0, 8),
           ),
-        ),
-        style: ElevatedButton.styleFrom(
-          backgroundColor: _isSwinging ? AppColors.surfaceLight : AppColors.primary,
-          foregroundColor: Colors.white,
-          elevation: 0,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(30),
+        ],
+      ),
+      child: SizedBox(
+        width: double.infinity,
+        height: 64,
+        child: ElevatedButton.icon(
+          onPressed: _isSwinging ? null : _handleRecordButtonPress,
+          icon: AnimatedSwitcher(
+            duration: const Duration(milliseconds: 300),
+            child: Icon(
+              _isSwinging ? Icons.hourglass_top : Icons.play_circle_fill,
+              size: 28,
+              key: ValueKey(_isSwinging),
+            ),
+          ),
+          label: Text(
+            _isSwinging ? 'DEMO SWING...' : 'DEMO SWING',
+            style: const TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 1,
+            ),
+          ),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: _isSwinging ? AppColors.surfaceLight : AppColors.primary,
+            foregroundColor: Colors.white,
+            elevation: 0,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(30),
+            ),
           ),
         ),
       ),
-    ),
-  );
+    );
+  }
 
   LineChartData _buildChartData() {
     return LineChartData(
