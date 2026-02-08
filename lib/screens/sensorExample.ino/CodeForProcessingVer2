@@ -1,0 +1,276 @@
+import processing.serial.*;
+
+// ==========================================
+// 1. ตั้งค่าตัวแปร Global
+// ==========================================
+Serial myPort;
+int TOTAL_SENSORS = 64; 
+int[] sensors = new int[TOTAL_SENSORS]; 
+
+// การจัดวาง (Layout)
+int cols = 5;       // กว้าง 5 ช่อง
+int cellSize = 60;  // ขนาดช่องสี่เหลี่ยม
+int spacing = 450;  // ระยะห่างระหว่างเท้าซ้าย-ขวา
+int offsetX = 50;   // ขยับขอบซ้าย
+int offsetY = 500;  // ระดับความสูงของเท้า (วาดจากล่างขึ้นบน)
+
+// ตัวแปรฟิสิกส์
+float copX_L = 0, copY_L = 0; 
+float copX_R = 0, copY_R = 0; 
+float totalForceL = 0, totalForceR = 0;
+float balanceLeftPct = 50; // ค่าเริ่มต้นกลางๆ
+
+// ตัวแปรสำหรับกราฟเส้น (History Graph)
+ArrayList<Float> historyBalance = new ArrayList<Float>(); // เก็บประวัติการถ่ายน้ำหนัก
+ArrayList<Float> historyForce = new ArrayList<Float>();   // เก็บประวัติแรงกดรวม
+int maxHistory = 300; // ความยาวของกราฟย้อนหลัง
+
+void setup() {
+  size(900, 800); // ขนาดหน้าจอ (สูง 800 เพื่อให้พอกับกราฟล่าง)
+  textSize(16);
+  textAlign(CENTER, CENTER);
+  
+  // เชื่อมต่อ Serial
+  try {
+    // ** เช็ค Index [0] ให้ตรงกับเครื่องคุณ ** // (ถ้า Error ให้แก้เลขตรงนี้เป็น 1 หรือ 2)
+    String portName = Serial.list()[0]; 
+    myPort = new Serial(this, portName, 115200);
+    myPort.bufferUntil('\n');
+    println("Connected to: " + portName);
+  } catch (Exception e) {
+    println("Error: ไม่พบ Serial Port (โปรแกรมจะรันหน้าเปล่าๆ)");
+  }
+}
+
+void draw() {
+  background(30); // ล้างหน้าจอเป็นสีเทาเข้มทุกเฟรม
+  
+  // 1. คำนวณค่าฟิสิกส์ (พร้อมระบบกันค่าเพี้ยน)
+  calculatePhysics();
+  
+  // 2. วาด Heatmap (เท้าซ้าย-ขวา)
+  drawHeatmap();
+  
+  // 3. วาด Dashboard ด้านบน (Bar Chart)
+  drawTopDashboard();
+  
+  // 4. วาดจุด CoP (จุดศูนย์ถ่วงสีเหลือง)
+  drawCoPPoint(copX_L, copY_L, offsetX, true);
+  drawCoPPoint(copX_R, copY_R, offsetX + spacing, false);
+  
+  // 5. วาดกราฟเส้นย้อนหลัง (ด้านล่าง)
+  drawHistoryGraph(50, 600, 800, 150); // x, y, กว้าง, สูง
+}
+
+// ==========================================
+// ฟังก์ชันคำนวณและ Logic
+// ==========================================
+
+void calculatePhysics() {
+  // คำนวณเท้าซ้าย (Index 0-24)
+  calculateFootStats(0, 24, true);   
+  // คำนวณเท้าขวา (Index 32-56)
+  calculateFootStats(32, 56, false); 
+  
+  float totalSystemForce = totalForceL + totalForceR;
+  
+  // --- THRESHOLD LOGIC: แก้ปัญหาเลขค้าง ---
+  if (totalSystemForce > 300) { 
+    // ต้องมีแรงกดรวมเกิน 300 ถึงจะคำนวณ % จริง
+    balanceLeftPct = (totalForceL / totalSystemForce) * 100;
+  } else {
+    // ถ้าไม่มีใครเหยียบ (หรือเหยียบเบามาก) ให้เคลียร์ค่าเป็น 0
+    balanceLeftPct = 50; // ตั้ง 50 เพื่อให้กราฟเส้นอยู่ตรงกลางสวยๆ (แต่ Text จะโชว์ 0)
+    totalForceL = 0;
+    totalForceR = 0;
+    totalSystemForce = 0;
+  }
+  
+  // เก็บลงประวัติกราฟ (History)
+  historyBalance.add(balanceLeftPct);
+  historyForce.add(totalSystemForce);
+  
+  // ลบข้อมูลเก่าทิ้ง ถ้าเกินขอบเขต
+  if (historyBalance.size() > maxHistory) {
+    historyBalance.remove(0);
+    historyForce.remove(0);
+  }
+}
+
+void drawHeatmap() {
+  fill(255); textSize(24);
+  text("LEFT FOOT", offsetX + (2.5*cellSize), 100);
+  text("RIGHT FOOT", offsetX + spacing + (2.5*cellSize), 100);
+  
+  for (int i = 0; i < TOTAL_SENSORS; i++) {
+    float x = -1000, y = -1000;
+    boolean shouldDraw = false;
+    
+    // Mapping Index -> Grid
+    if (i >= 0 && i <= 24) { // ซ้าย
+      shouldDraw = true;
+      int col = i % cols;
+      int row = i / cols;
+      x = offsetX + (col * cellSize);
+      y = offsetY - (row * cellSize);
+    } else if (i >= 32 && i <= 56) { // ขวา
+      shouldDraw = true;
+      int idx = i - 32;
+      int col = idx % cols;
+      int row = idx / cols;
+      x = offsetX + spacing + (col * cellSize);
+      y = offsetY - (row * cellSize);
+    }
+    
+    if (shouldDraw) {
+      int pressure = sensors[i];
+      // ใช้โหมดสี HSB ไล่สีรุ้ง (น้ำเงิน -> แดง)
+      colorMode(HSB, 360, 100, 100);
+      if (pressure < 50) {
+        fill(0, 0, 20); // สีพื้นตอนไม่มีแรงกด
+      } else {
+        float hueVal = map(pressure, 0, 4095, 240, 0); 
+        fill(hueVal, 100, 100);
+      }
+      stroke(0);
+      rect(x, y, cellSize, cellSize);
+      
+      // แสดงตัวเลข
+      fill(255); textSize(12);
+      text(pressure, x + cellSize/2, y + cellSize/2);
+      colorMode(RGB, 255); // กลับโหมดสีปกติ
+    }
+  }
+}
+
+void drawTopDashboard() {
+  float barX = 150, barY = 40, barW = 600, barH = 40;
+  float totalSystemForce = totalForceL + totalForceR; // เช็คแรงรวมเพื่อวาด Bar
+  
+  // กรอบพื้นหลัง
+  fill(50); noStroke(); rect(barX, barY, barW, barH);
+  
+  if (totalSystemForce > 300) {
+    // --- กรณีมีคนยืน: วาด Bar สีเขียว/แดง ---
+    fill(0, 200, 100); // เขียว (ซ้าย)
+    float leftW = map(balanceLeftPct, 0, 100, 0, barW);
+    rect(barX, barY, leftW, barH);
+    
+    fill(200, 50, 50); // แดง (ขวา)
+    rect(barX + leftW, barY, barW - leftW, barH);
+    
+    // ตัวเลข %
+    fill(255); textSize(20); 
+    textAlign(LEFT, CENTER);
+    text("L: " + int(balanceLeftPct) + "%", barX - 60, barY + 20);
+    textAlign(RIGHT, CENTER);
+    text("R: " + int(100 - balanceLeftPct) + "%", barX + barW + 60, barY + 20);
+    
+  } else {
+    // --- กรณีไม่มีคนยืน: วาด Bar ว่างเปล่า และเลข 0% ---
+    fill(255); textSize(20); 
+    textAlign(LEFT, CENTER);
+    text("L: 0%", barX - 60, barY + 20);
+    textAlign(RIGHT, CENTER);
+    text("R: 0%", barX + barW + 60, barY + 20);
+  }
+  textAlign(CENTER, CENTER); // คืนค่า Alignment
+}
+
+void drawCoPPoint(float cx, float cy, float startX, boolean isLeft) {
+  // แปลงค่าเฉลี่ย (0-4) เป็น Pixel
+  float screenX = startX + (cx * cellSize) + (cellSize/2);
+  float screenY = offsetY - (cy * cellSize) + (cellSize/2);
+  
+  // เช็คว่ามีแรงกดไหม (ถ้าไม่มีแรงกด ไม่ต้องวาดจุด)
+  boolean hasForce = isLeft ? (totalForceL > 100) : (totalForceR > 100);
+  
+  if (hasForce) {
+    fill(255, 255, 0); // สีเหลือง
+    stroke(255); strokeWeight(3);
+    ellipse(screenX, screenY, 20, 20); // วาดวงกลม CoP
+    noStroke();
+  }
+}
+
+void drawHistoryGraph(float x, float y, float w, float h) {
+  // 1. กรอบกราฟ
+  fill(20); stroke(100);
+  rect(x, y, w, h);
+  
+  // เส้นกึ่งกลาง (50%)
+  stroke(80); line(x, y + h/2, x + w, y + h/2);
+  
+  // 2. วาดเส้นกราฟ Balance (สีฟ้า)
+  noFill(); stroke(0, 255, 255); strokeWeight(2);
+  beginShape();
+  for (int i = 0; i < historyBalance.size(); i++) {
+    float val = historyBalance.get(i); // 0-100
+    float px = map(i, 0, maxHistory, x, x + w);
+    float py = map(val, 0, 100, y + h, y); 
+    vertex(px, py);
+  }
+  endShape();
+  
+  // 3. วาดเส้นกราฟ Total Force (สีส้ม) ซ้อนทับ
+  // หาค่า Max Force ในประวัติเพื่อ Scale กราฟ
+  float maxF = 100; 
+  for(float f : historyForce) { if(f > maxF) maxF = f; }
+  
+  stroke(255, 150, 0, 180); // สีส้มโปร่งแสง
+  beginShape();
+  for (int i = 0; i < historyForce.size(); i++) {
+    float val = historyForce.get(i);
+    float px = map(i, 0, maxHistory, x, x + w);
+    float py = map(val, 0, maxF, y + h, y); 
+    vertex(px, py);
+  }
+  endShape();
+  
+  // คำอธิบาย (Legend)
+  fill(0, 255, 255); textSize(12); textAlign(LEFT);
+  text("Balance (Shift L-R)", x + 10, y + 20);
+  fill(255, 150, 0);
+  text("Total Force (Power)", x + 10, y + 40);
+  textAlign(CENTER, CENTER);
+}
+
+void calculateFootStats(int startIdx, int endIdx, boolean isLeft) {
+  float sumForce = 0;
+  float sumX = 0;
+  float sumY = 0;
+  
+  for (int i = startIdx; i <= endIdx; i++) {
+    float val = sensors[i];
+    if (val < 50) val = 0; // Noise Filter
+    
+    int relativeIdx = isLeft ? i : (i - 32);
+    int col = relativeIdx % cols; 
+    int row = relativeIdx / cols; 
+    
+    sumForce += val;
+    sumX += val * col; 
+    sumY += val * row; 
+  }
+  
+  if (isLeft) {
+    totalForceL = sumForce;
+    if (sumForce > 0) { copX_L = sumX / sumForce; copY_L = sumY / sumForce; }
+  } else {
+    totalForceR = sumForce;
+    if (sumForce > 0) { copX_R = sumX / sumForce; copY_R = sumY / sumForce; }
+  }
+}
+
+void serialEvent(Serial myPort) {
+  try {
+    String inString = myPort.readStringUntil('\n');
+    if (inString != null) {
+      inString = trim(inString);
+      int[] temp = int(split(inString, ','));
+      if (temp.length == TOTAL_SENSORS) {
+        sensors = temp;
+      }
+    }
+  } catch (Exception e) { }
+}

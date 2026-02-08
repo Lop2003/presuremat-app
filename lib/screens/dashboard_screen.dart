@@ -1,4 +1,4 @@
-  import 'dart:async';
+import 'dart:async';
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
@@ -37,6 +37,14 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
   List<List<double>> _leftFootPressure = [];
   List<List<double>> _rightFootPressure = [];
   bool _showHeatmap = true;
+
+  // Force tracking (matching Processing Ver2 logic)
+  double _totalForceLeft = 0.0;
+  double _totalForceRight = 0.0;
+  static const double _forceThreshold = 300.0; // Min force to calculate balance
+  
+  // Total force history for dual-line graph
+  List<FlSpot> _totalForceDataPoints = [];
 
   // Camera
   CameraController? _cameraController;
@@ -454,7 +462,7 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
     // Right Foot: 32-56
     final rightGrid5x5 = _mapTo5x5Grid(sensors, 32);
 
-    // Calculate total pressure
+    // Calculate total force for each foot
     double leftTotal = 0;
     double rightTotal = 0;
 
@@ -465,9 +473,24 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
       for(var val in row) rightTotal += val;
     }
 
-    double total = leftTotal + rightTotal;
-    double leftPercent = total > 0 ? (leftTotal / total) * 100 : 50.0;
-    double rightPercent = total > 0 ? (rightTotal / total) * 100 : 50.0;
+    // Store raw force values
+    _totalForceLeft = leftTotal;
+    _totalForceRight = rightTotal;
+    double totalSystemForce = leftTotal + rightTotal;
+    
+    // Apply threshold logic (matching Processing Ver2)
+    double leftPercent;
+    double rightPercent;
+    
+    if (totalSystemForce > _forceThreshold) {
+      // Calculate actual balance when force is above threshold
+      leftPercent = (leftTotal / totalSystemForce) * 100;
+      rightPercent = (rightTotal / totalSystemForce) * 100;
+    } else {
+      // Below threshold: show 0% (no one standing)
+      leftPercent = 0.0;
+      rightPercent = 0.0;
+    }
     
     // Normalize 5x5 grids to 0-100 for display
     const double maxRawValue = 4095.0;
@@ -478,7 +501,7 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
       row.map((v) => (v / maxRawValue * 100.0).clamp(0.0, 100.0)).toList()
     ).toList();
 
-    _updateDataFromSerial(leftPercent, rightPercent, leftGridDisplay, rightGridDisplay);
+    _updateDataFromSerial(leftPercent, rightPercent, leftGridDisplay, rightGridDisplay, totalSystemForce);
     
     // If recording, buffer the data
     if (_isRecording) {
@@ -488,6 +511,7 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
         'r': rightPercent,
         'raw_left': leftGrid5x5,
         'raw_right': rightGrid5x5,
+        'total_force': totalSystemForce,
       });
     }
   }
@@ -511,7 +535,7 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
   }
   // _scaleTo10x6 removed - now using 5x5 grids directly with SimpleGridHeatmap
   
-  void _updateDataFromSerial(double left, double right, List<List<double>> leftHeatmap, List<List<double>> rightHeatmap) {
+  void _updateDataFromSerial(double left, double right, List<List<double>> leftHeatmap, List<List<double>> rightHeatmap, double totalForce) {
       setState(() {
         _leftWeightPercent = left;
         _rightWeightPercent = right;
@@ -521,16 +545,18 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
         if (_leftDataPoints.length > 50) {
           _leftDataPoints.removeAt(0);
           _rightDataPoints.removeAt(0);
+          _totalForceDataPoints.removeAt(0);
         }
 
         _leftDataPoints.add(FlSpot(_graphXValue, left));
         _rightDataPoints.add(FlSpot(_graphXValue, right));
+        
+        // Normalize total force to 0-100 scale for graph display (max ~25000 for 25 sensors x 1000 each)
+        final normalizedForce = (totalForce / 30000.0 * 100.0).clamp(0.0, 100.0);
+        _totalForceDataPoints.add(FlSpot(_graphXValue, normalizedForce));
 
         _leftFootPressure = leftHeatmap;
         _rightFootPressure = rightHeatmap;
-        
-        // Simple swing phase detection based on weight shift (optional)
-        // _detectSwingPhase(left, right);
       });
   }
 
@@ -549,25 +575,52 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
     return Scaffold(
       backgroundColor: AppColors.backgroundDark,
       body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 24.0),
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              // App Bar
               _buildAppBar(context),
-              const SizedBox(height: 24),
-              _buildCameraPreview(),
-              const SizedBox(height: 24),
-              _buildWeightCards(),
-              const SizedBox(height: 24),
-              if (_showHeatmap) ...[
-                _buildHeatmapSection(),
-                const SizedBox(height: 24),
-              ],
-              _buildChartCard(),
-              const SizedBox(height: 24),
-              _buildRecordButton(),
-              const SizedBox(height: 20),
+              const SizedBox(height: 16),
+              // Main Content - Two Columns
+              Expanded(
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    // Left Column: Camera + Heatmap
+                    Expanded(
+                      flex: 1,
+                      child: Column(
+                        children: [
+                          // Camera Preview
+                          Expanded(flex: 3, child: _buildCameraPreview()),
+                          const SizedBox(height: 12),
+                          // Heatmap (increased height)
+                          if (_showHeatmap)
+                            Expanded(flex: 3, child: _buildHeatmapSection()),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    // Right Column: Balance + Chart + Record
+                    Expanded(
+                      flex: 1,
+                      child: Column(
+                        children: [
+                          // Balance Bar (compact)
+                          _buildWeightCards(),
+                          const SizedBox(height: 12),
+                          // Chart (takes most space)
+                          Expanded(child: _buildChartCard()),
+                          const SizedBox(height: 12),
+                          // Record Button (compact)
+                          SizedBox(height: 50, child: _buildRecordButton()),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ],
           ),
         ),
@@ -719,7 +772,9 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
             FutureBuilder<void>(
               future: _initializeControllerFuture,
               builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.done) {
+                if (snapshot.connectionState == ConnectionState.done &&
+                    _cameraController != null &&
+                    _cameraController!.value.isInitialized) {
                   return Center(
                     child: AspectRatio(
                       aspectRatio: _cameraController!.value.aspectRatio,
@@ -826,47 +881,82 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
     );
   }
 
-
-  Widget _buildWeightCards() => Row(
-    children: [
-      Expanded(
-        child: TweenAnimationBuilder<double>(
-          tween: Tween(begin: 0.0, end: 1.0),
-          duration: const Duration(milliseconds: 500),
-          builder: (context, value, child) => Transform.scale(
-            scale: value,
-            child: _WeightCard(
-              label: "Left",
-              percentage: _leftWeightPercent,
-              color: AppColors.secondary,
-              side: 'L',
+  // Balance Bar Chart (like Processing Ver2)
+  Widget _buildWeightCards() => Container(
+    height: 80,
+    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+    decoration: BoxDecoration(
+      borderRadius: BorderRadius.circular(16),
+      color: AppColors.surfaceDark,
+      border: Border.all(color: Colors.white.withOpacity(0.05)),
+    ),
+    child: Column(
+      children: [
+        // Labels
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(
+              'L: ${_leftWeightPercent.toInt()}%',
+              style: const TextStyle(
+                color: Colors.greenAccent,
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const Text(
+              'Balance',
+              style: TextStyle(
+                color: Colors.white70,
+                fontSize: 14,
+              ),
+            ),
+            Text(
+              'R: ${_rightWeightPercent.toInt()}%',
+              style: const TextStyle(
+                color: Colors.redAccent,
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        // Balance Bar
+        Container(
+          height: 24,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
+            color: Colors.grey[800],
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(12),
+            child: Row(
+              children: [
+                // Left (Green)
+                Expanded(
+                  flex: (_leftWeightPercent + _rightWeightPercent) > 0 
+                      ? _leftWeightPercent.toInt().clamp(0, 100)
+                      : 50,
+                  child: Container(color: Colors.green),
+                ),
+                // Right (Red)
+                Expanded(
+                  flex: (_leftWeightPercent + _rightWeightPercent) > 0 
+                      ? _rightWeightPercent.toInt().clamp(0, 100)
+                      : 50,
+                  child: Container(color: Colors.red),
+                ),
+              ],
             ),
           ),
         ),
-      ),
-      const SizedBox(width: 16),
-      Expanded(
-        child: TweenAnimationBuilder<double>(
-          tween: Tween(begin: 0.0, end: 1.0),
-          duration: const Duration(milliseconds: 500),
-          curve: Curves.easeOutBack,
-          builder: (context, value, child) => Transform.scale(
-            scale: value,
-            child: _WeightCard(
-              label: "Right",
-              percentage: _rightWeightPercent,
-              color: AppColors.primary,
-              side: 'R',
-            ),
-          ),
-        ),
-      ),
-    ],
+      ],
+    ),
   );
 
   Widget _buildChartCard() => Container(
-    height: 320,
-    padding: const EdgeInsets.all(24),
+    padding: const EdgeInsets.all(16),
     decoration: BoxDecoration(
       borderRadius: BorderRadius.circular(24),
       color: AppColors.surfaceDark,
@@ -881,32 +971,93 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
     ),
     child: Column(
       children: [
+        // Header with clear explanation
         Row(
           children: [
             Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: AppColors.secondary.withOpacity(0.1),
+                color: Colors.cyanAccent.withOpacity(0.1),
                 borderRadius: BorderRadius.circular(10),
               ),
-              child: const Icon(Icons.show_chart, color: AppColors.secondary, size: 20),
+              child: const Icon(Icons.show_chart, color: Colors.cyanAccent, size: 20),
             ),
             const SizedBox(width: 12),
-            const Text(
-              'Balance Analysis',
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-                color: Colors.white,
-              ),
+            const Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Weight Distribution',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.white,
+                  ),
+                ),
+                Text(
+                  '50% = Balanced | >50% = Left | <50% = Right',
+                  style: TextStyle(
+                    fontSize: 10,
+                    color: Colors.white54,
+                  ),
+                ),
+              ],
             ),
-            const Spacer(),
-            _LegendItem(label: 'Left', color: AppColors.secondary),
-            const SizedBox(width: 16),
-            _LegendItem(label: 'Right', color: AppColors.primary),
           ],
         ),
-        const SizedBox(height: 24),
+        const SizedBox(height: 8),
+        // Legend
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: Colors.cyanAccent.withOpacity(0.2),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Row(
+                children: [
+                  Icon(Icons.arrow_upward, color: Colors.cyanAccent, size: 14),
+                  SizedBox(width: 4),
+                  Text('Left %', style: TextStyle(color: Colors.cyanAccent, fontSize: 11, fontWeight: FontWeight.bold)),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: Colors.redAccent.withOpacity(0.2),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Row(
+                children: [
+                  Icon(Icons.arrow_downward, color: Colors.redAccent, size: 14),
+                  SizedBox(width: 4),
+                  Text('Right %', style: TextStyle(color: Colors.redAccent, fontSize: 11, fontWeight: FontWeight.bold)),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: Colors.orangeAccent.withOpacity(0.2),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Row(
+                children: [
+                  Icon(Icons.fitness_center, color: Colors.orangeAccent, size: 14),
+                  SizedBox(width: 4),
+                  Text('Force', style: TextStyle(color: Colors.orangeAccent, fontSize: 11, fontWeight: FontWeight.bold)),
+                ],
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        // Chart
         Expanded(
           child: LineChart(
             _buildChartData(),
@@ -970,10 +1121,9 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
             ),
           ],
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 8),
         // Using SimpleGridHeatmap - simple 5x5 grids
-        SizedBox(
-          height: 200, // Fixed height for heatmaps
+        Expanded(
           child: Row(
             children: [
               Expanded(
@@ -1114,12 +1264,22 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
     return LineChartData(
       gridData: FlGridData(
         show: true,
-        drawVerticalLine: true,
+        drawVerticalLine: false,
         horizontalInterval: 25,
-        getDrawingHorizontalLine: (value) =>
-            FlLine(color: Colors.white.withOpacity(0.05), strokeWidth: 1, dashArray: [5, 5]),
-        getDrawingVerticalLine: (value) =>
-            FlLine(color: Colors.white.withOpacity(0.05), strokeWidth: 1, dashArray: [5, 5]),
+        getDrawingHorizontalLine: (value) {
+          // Highlight 50% line (balanced)
+          if (value == 50) {
+            return FlLine(
+              color: Colors.greenAccent.withOpacity(0.6),
+              strokeWidth: 2,
+              dashArray: [8, 4],
+            );
+          }
+          return FlLine(
+            color: Colors.white.withOpacity(0.1),
+            strokeWidth: 1,
+          );
+        },
       ),
       titlesData: FlTitlesData(
         rightTitles: const AxisTitles(
@@ -1132,15 +1292,31 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
         leftTitles: AxisTitles(
           sideTitles: SideTitles(
             showTitles: true,
-            interval: 25,
-            getTitlesWidget: (value, meta) => Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: Text(
-                '${value.toInt()}%',
-                style: const TextStyle(color: AppColors.textSecondary, fontSize: 10, fontWeight: FontWeight.bold),
-              ),
-            ),
-            reservedSize: 40,
+            interval: 50,
+            getTitlesWidget: (value, meta) {
+              String label;
+              Color color;
+              if (value == 100) {
+                label = 'L 100%';
+                color = Colors.cyanAccent;
+              } else if (value == 50) {
+                label = '50%';
+                color = Colors.greenAccent;
+              } else if (value == 0) {
+                label = 'R 0%';
+                color = Colors.redAccent;
+              } else {
+                return const SizedBox.shrink();
+              }
+              return Padding(
+                padding: const EdgeInsets.only(right: 4),
+                child: Text(
+                  label,
+                  style: TextStyle(color: color, fontSize: 9, fontWeight: FontWeight.bold),
+                ),
+              );
+            },
+            reservedSize: 45,
           ),
         ),
       ),
@@ -1150,8 +1326,12 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
       minY: 0,
       maxY: 100,
       lineBarsData: [
-        _createLineChartBarData(_leftDataPoints, AppColors.secondary),
-        _createLineChartBarData(_rightDataPoints, AppColors.primary),
+        // Left foot line (cyan)
+        _createLineChartBarData(_leftDataPoints, Colors.cyanAccent),
+        // Right foot line (red)
+        _createLineChartBarData(_rightDataPoints, Colors.redAccent),
+        // Total Force line (orange)
+        _createLineChartBarData(_totalForceDataPoints, Colors.orangeAccent),
       ],
       lineTouchData: LineTouchData(
         touchTooltipData: LineTouchTooltipData(
@@ -1168,7 +1348,21 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
       color: color,
       barWidth: 3,
       isStrokeCapRound: true,
-      dotData: const FlDotData(show: false),
+      dotData: FlDotData(
+        show: true,
+        getDotPainter: (spot, percent, barData, index) {
+          // Only show dot on the last (current) point
+          if (index == spots.length - 1) {
+            return FlDotCirclePainter(
+              radius: 5,
+              color: color,
+              strokeWidth: 2,
+              strokeColor: Colors.white,
+            );
+          }
+          return FlDotCirclePainter(radius: 0, color: Colors.transparent);
+        },
+      ),
       belowBarData: BarAreaData(
         show: true,
         gradient: LinearGradient(

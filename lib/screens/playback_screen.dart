@@ -460,7 +460,7 @@ class _PlaybackScreenState extends State<PlaybackScreen> {
 
   Widget _buildChartSection(List<FlSpot> leftDataPoints, List<FlSpot> rightDataPoints) {
     return Container(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(20),
         color: const Color(0xFF1F2937),
@@ -474,39 +474,80 @@ class _PlaybackScreenState extends State<PlaybackScreen> {
       ),
       child: Column(
         children: [
+          // Header with explanation
           Row(
             children: [
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: Colors.blue.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(12),
+                  color: Colors.cyanAccent.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(Icons.show_chart, color: Colors.cyanAccent, size: 20),
+              ),
+              const SizedBox(width: 12),
+              const Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Weight Distribution',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.white,
+                    ),
+                  ),
+                  Text(
+                    '50% = Balanced | >50% = Left | <50% = Right',
+                    style: TextStyle(
+                      fontSize: 10,
+                      color: Colors.white54,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          // Legend
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.cyanAccent.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(8),
                 ),
                 child: const Row(
                   children: [
-                    Icon(Icons.show_chart, color: Colors.blue, size: 18),
-                    SizedBox(width: 8),
-                    Text(
-                      'Balance Analysis',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
+                    Icon(Icons.arrow_upward, color: Colors.cyanAccent, size: 14),
+                    SizedBox(width: 4),
+                    Text('Left %', style: TextStyle(color: Colors.cyanAccent, fontSize: 11, fontWeight: FontWeight.bold)),
                   ],
                 ),
               ),
-              const Spacer(),
-              _buildLegendItem('Left', const Color(0xFF3B82F6)),
-              const SizedBox(width: 12),
-              _buildLegendItem('Right', const Color(0xFFEC4899)),
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.redAccent.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Row(
+                  children: [
+                    Icon(Icons.arrow_downward, color: Colors.redAccent, size: 14),
+                    SizedBox(width: 4),
+                    Text('Right %', style: TextStyle(color: Colors.redAccent, fontSize: 11, fontWeight: FontWeight.bold)),
+                  ],
+                ),
+              ),
             ],
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 8),
           Expanded(
             child: LineChart(
-              _buildPlaybackChartData(leftDataPoints, rightDataPoints),
+              _buildPlaybackChartData(leftDataPoints, rightDataPoints, _currentTime),
             ),
           ),
         ],
@@ -778,27 +819,61 @@ class _PlaybackScreenState extends State<PlaybackScreen> {
   LineChartData _buildPlaybackChartData(
     List<FlSpot> leftSpots,
     List<FlSpot> rightSpots,
+    double currentTimeX, // Current playback position
   ) {
+    // Get min and max X values from data
+    final minX = leftSpots.isNotEmpty ? leftSpots.first.x : 0.0;
+    final maxX = leftSpots.isNotEmpty ? leftSpots.last.x : 1.0;
+    
     return LineChartData(
       gridData: FlGridData(
         show: true,
-        drawVerticalLine: true,
+        drawVerticalLine: false,
         horizontalInterval: 25,
-        getDrawingHorizontalLine: (value) =>
-            FlLine(color: Colors.white.withOpacity(0.1), strokeWidth: 1),
-        getDrawingVerticalLine: (value) =>
-            FlLine(color: Colors.white.withOpacity(0.05), strokeWidth: 1),
+        getDrawingHorizontalLine: (value) {
+          // Highlight 50% line (balanced)
+          if (value == 50) {
+            return FlLine(
+              color: Colors.greenAccent.withOpacity(0.6),
+              strokeWidth: 2,
+              dashArray: [8, 4],
+            );
+          }
+          return FlLine(
+            color: Colors.white.withOpacity(0.1),
+            strokeWidth: 1,
+          );
+        },
       ),
       titlesData: FlTitlesData(
         leftTitles: AxisTitles(
           sideTitles: SideTitles(
             showTitles: true,
-            interval: 25,
-            getTitlesWidget: (value, meta) => Text(
-              '${value.toInt()}%',
-              style: const TextStyle(color: Colors.white54, fontSize: 10),
-            ),
-            reservedSize: 40,
+            interval: 50,
+            getTitlesWidget: (value, meta) {
+              String label;
+              Color color;
+              if (value == 100) {
+                label = 'L 100%';
+                color = Colors.cyanAccent;
+              } else if (value == 50) {
+                label = '50%';
+                color = Colors.greenAccent;
+              } else if (value == 0) {
+                label = 'R 0%';
+                color = Colors.redAccent;
+              } else {
+                return const SizedBox.shrink();
+              }
+              return Padding(
+                padding: const EdgeInsets.only(right: 4),
+                child: Text(
+                  label,
+                  style: TextStyle(color: color, fontSize: 9, fontWeight: FontWeight.bold),
+                ),
+              );
+            },
+            reservedSize: 45,
           ),
         ),
         bottomTitles: AxisTitles(
@@ -806,10 +881,10 @@ class _PlaybackScreenState extends State<PlaybackScreen> {
             showTitles: true,
             interval: 1,
             getTitlesWidget: (value, meta) => Text(
-              value.toStringAsFixed(1),
+              '${value.toInt()}s',
               style: const TextStyle(color: Colors.white54, fontSize: 10),
             ),
-            reservedSize: 30,
+            reservedSize: 25,
           ),
         ),
         rightTitles: const AxisTitles(
@@ -817,30 +892,60 @@ class _PlaybackScreenState extends State<PlaybackScreen> {
         ),
         topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
       ),
-      borderData: FlBorderData(
-        show: true,
-        border: Border.all(color: Colors.white24),
-      ),
+      borderData: FlBorderData(show: false),
+      minX: minX,
+      maxX: maxX,
       minY: 0,
       maxY: 100,
+      // Playhead vertical line
+      extraLinesData: ExtraLinesData(
+        verticalLines: [
+          VerticalLine(
+            x: currentTimeX.clamp(minX, maxX),
+            color: Colors.yellowAccent,
+            strokeWidth: 3,
+            dashArray: [5, 3],
+            label: VerticalLineLabel(
+              show: true,
+              alignment: Alignment.topCenter,
+              style: const TextStyle(color: Colors.yellowAccent, fontSize: 10, fontWeight: FontWeight.bold),
+              labelResolver: (line) => '▼',
+            ),
+          ),
+        ],
+      ),
       lineBarsData: [
+        // Left foot line (cyan)
         LineChartBarData(
           spots: leftSpots,
           isCurved: true,
-          gradient: const LinearGradient(
-            colors: [Colors.cyanAccent, Colors.blueAccent],
-          ),
-          barWidth: 4,
+          color: Colors.cyanAccent,
+          barWidth: 3,
           dotData: const FlDotData(show: false),
+          belowBarData: BarAreaData(
+            show: true,
+            gradient: LinearGradient(
+              colors: [Colors.cyanAccent.withOpacity(0.3), Colors.cyanAccent.withOpacity(0.0)],
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+            ),
+          ),
         ),
+        // Right foot line (red)
         LineChartBarData(
           spots: rightSpots,
           isCurved: true,
-          gradient: const LinearGradient(
-            colors: [Colors.pinkAccent, Colors.redAccent],
-          ),
-          barWidth: 4,
+          color: Colors.redAccent,
+          barWidth: 3,
           dotData: const FlDotData(show: false),
+          belowBarData: BarAreaData(
+            show: true,
+            gradient: LinearGradient(
+              colors: [Colors.redAccent.withOpacity(0.3), Colors.redAccent.withOpacity(0.0)],
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+            ),
+          ),
         ),
       ],
     );
