@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:intl/intl.dart';
-import 'package:golf_force_plate/widgets/foot_heatmap.dart';
+import 'package:golf_force_plate/widgets/simple_grid_heatmap.dart';
 import 'package:video_player/video_player.dart';
 import 'dart:io';
 
@@ -166,15 +166,15 @@ class _PlaybackScreenState extends State<PlaybackScreen> {
       _rightFootPressure = _parsePressureData(heatmapData['rightFoot']);
       _currentSwingPhase = heatmapData['swingPhase'] ?? heatmapData['swing_phase'] ?? 'Ready';
     } else {
-      // สร้างข้อมูล heatmap เริ่มต้น
-      _leftFootPressure = HeatmapDataGenerator.generateRandomFootPressure(isLeftFoot: true);
-      _rightFootPressure = HeatmapDataGenerator.generateRandomFootPressure(isLeftFoot: false);
+      // สร้างข้อมูล heatmap เริ่มต้น (5x5 grid)
+      _leftFootPressure = List.generate(5, (_) => List.filled(5, 0.0));
+      _rightFootPressure = List.generate(5, (_) => List.filled(5, 0.0));
     }
   }
 
   // Parse pressure data from either List<List> or Map (legacy)
   List<List<double>> _parsePressureData(dynamic data) {
-      if (data == null) return HeatmapDataGenerator.generateRandomFootPressure(isLeftFoot: true); // fallback
+      if (data == null) return List.generate(5, (_) => List.filled(5, 0.0)); // fallback to 5x5 grid
 
       if (data is List) {
           // It's a list of lists
@@ -183,7 +183,7 @@ class _PlaybackScreenState extends State<PlaybackScreen> {
           // Legacy map format
           return _convertMapTo2DArray(data as Map<String, dynamic>);
       }
-      return HeatmapDataGenerator.generateRandomFootPressure(isLeftFoot: true);
+      return List.generate(5, (_) => List.filled(5, 0.0));
   }
 
 
@@ -431,50 +431,27 @@ class _PlaybackScreenState extends State<PlaybackScreen> {
               ),
             ],
           ),
-          const SizedBox(height: 20),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-            children: [
-              Expanded(
-                child: Column(
-                  children: [
-                    FootHeatmap(
-                      pressureData: _leftFootPressure,
-                      isLeftFoot: true,
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Left Foot',
-                      style: TextStyle(
-                        color: Colors.white.withOpacity(0.8),
-                        fontSize: 12,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ],
+          const SizedBox(height: 16),
+          // Using SimpleGridHeatmap - simple 5x5 grids
+          SizedBox(
+            height: 180,
+            child: Row(
+              children: [
+                Expanded(
+                  child: SimpleGridHeatmap(
+                    pressureData: _leftFootPressure,
+                    isLeftFoot: true,
+                  ),
                 ),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  children: [
-                    FootHeatmap(
-                      pressureData: _rightFootPressure,
-                      isLeftFoot: false,
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Right Foot',
-                      style: TextStyle(
-                        color: Colors.white.withOpacity(0.8),
-                        fontSize: 12,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ],
+                const SizedBox(width: 16),
+                Expanded(
+                  child: SimpleGridHeatmap(
+                    pressureData: _rightFootPressure,
+                    isLeftFoot: false,
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ],
       ),
@@ -699,28 +676,49 @@ class _PlaybackScreenState extends State<PlaybackScreen> {
     if (_dataPoints.isEmpty) return;
     
     int closestIndex = 0;
-    double minDiff = double.infinity;
     
-    for (int i = 0; i < _dataPoints.length; i++) {
-      final pointTime = (_dataPoints[i]['t'] as num).toDouble();
-      final diff = (pointTime - time).abs();
-      if (diff < minDiff) {
-        minDiff = diff;
-        closestIndex = i;
+    // Check if time values are relative (small numbers like 0.1, 0.2) or absolute (millisecond timestamps)
+    final firstTime = (_dataPoints.first['t'] as num).toDouble();
+    final lastTime = (_dataPoints.last['t'] as num).toDouble();
+    
+    if (firstTime > 1000000) {
+      // Absolute timestamps (milliseconds since epoch) - use proportional index
+      // Map video time (seconds) to data point index
+      final videoDuration = _videoController?.value.duration.inSeconds.toDouble() ?? 4.0;
+      final proportion = (time / videoDuration).clamp(0.0, 1.0);
+      closestIndex = (proportion * (_dataPoints.length - 1)).round().clamp(0, _dataPoints.length - 1);
+    } else {
+      // Relative time values - use original matching logic
+      double minDiff = double.infinity;
+      for (int i = 0; i < _dataPoints.length; i++) {
+        final pointTime = (_dataPoints[i]['t'] as num).toDouble();
+        final diff = (pointTime - time).abs();
+        if (diff < minDiff) {
+          minDiff = diff;
+          closestIndex = i;
+        }
       }
     }
     
     final point = _dataPoints[closestIndex];
     
-    // Check if we have real heatmap data
+    // Update heatmap data (caller is responsible for setState)
     if (point.containsKey('raw_left') && point['raw_left'] != null) {
       try {
+        // Normalize raw sensor values (0-4095) to display values (0-100)
+        const double maxRawValue = 4095.0;
         _leftFootPressure = (point['raw_left'] as List).map((row) {
-          return (row as List).map((val) => (val as num).toDouble()).toList();
+          return (row as List).map((val) {
+            final rawVal = (val as num).toDouble();
+            return (rawVal / maxRawValue * 100.0).clamp(0.0, 100.0);
+          }).toList();
         }).toList();
         
         _rightFootPressure = (point['raw_right'] as List).map((row) {
-          return (row as List).map((val) => (val as num).toDouble()).toList();
+          return (row as List).map((val) {
+            final rawVal = (val as num).toDouble();
+            return (rawVal / maxRawValue * 100.0).clamp(0.0, 100.0);
+          }).toList();
         }).toList();
       } catch (e) {
         debugPrint('Error parsing heatmap data: $e');
@@ -741,22 +739,23 @@ class _PlaybackScreenState extends State<PlaybackScreen> {
   }
 
   List<List<double>> _generateHeatmapFromWeight(double weight, bool isLeftFoot) {
-    final List<List<double>> result = List.generate(10, (i) => List.generate(6, (j) => 0.0));
+    // Generate 5x5 grid for SimpleGridHeatmap
+    final List<List<double>> result = List.generate(5, (i) => List.generate(5, (j) => 0.0));
     
     // สร้าง heatmap ตามน้ำหนัก
     final basePressure = weight / 100.0 * 80.0; // แปลงเป็น 0-80
     
-    for (int i = 0; i < 10; i++) {
-      for (int j = 0; j < 6; j++) {
+    for (int i = 0; i < 5; i++) {
+      for (int j = 0; j < 5; j++) {
         // สร้างรูปแบบการกระจายน้ำหนัก
         double pressure = basePressure;
         
-        // ส้นเท้า (แถวล่าง)
-        if (i >= 7) {
+        // ส้นเท้า (แถวล่าง - row 0, 1)
+        if (i <= 1) {
           pressure *= 1.2;
         }
-        // นิ้วเท้า (แถวบน)
-        else if (i <= 2) {
+        // นิ้วเท้า (แถวบน - row 3, 4)
+        else if (i >= 3) {
           pressure *= 0.8;
         }
         // กลางเท้า
