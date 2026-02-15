@@ -49,6 +49,7 @@ class _PlaybackScreenState extends State<PlaybackScreen> {
   @override
   void dispose() {
     _playbackTimer?.cancel();
+    _syncTimer?.cancel();
     _videoController?.dispose();
     super.dispose();
   }
@@ -244,27 +245,50 @@ class _PlaybackScreenState extends State<PlaybackScreen> {
 
   void _videoListener() {
     if (_videoController != null && _videoController!.value.isInitialized) {
-      final position = _videoController!.value.position;
-      final duration = _videoController!.value.duration;
       final isPlaying = _videoController!.value.isPlaying;
 
       if (isPlaying != _isPlaying) {
         if (mounted) setState(() => _isPlaying = isPlaying);
       }
 
-      if (position <= duration) {
-        final double seconds = position.inMilliseconds / 1000.0;
-        if (mounted) {
-          setState(() {
-            _currentTime = seconds;
-            _updateHeatmapForTime(_currentTime);
-          });
-        }
+      // Start high-frequency sync timer when playing
+      if (isPlaying && _syncTimer == null) {
+        _syncTimer = Timer.periodic(const Duration(milliseconds: 50), (_) {
+          _syncHeatmapWithVideo();
+        });
+      } else if (!isPlaying && _syncTimer != null) {
+        _syncTimer?.cancel();
+        _syncTimer = null;
+        // Do one final sync
+        _syncHeatmapWithVideo();
       }
-      
+
+      final position = _videoController!.value.position;
+      final duration = _videoController!.value.duration;
       if (position >= duration && !isPlaying) {
-         if (mounted) setState(() => _isPlaying = false);
+        if (mounted) setState(() => _isPlaying = false);
       }
+    }
+  }
+
+  Timer? _syncTimer;
+
+  void _syncHeatmapWithVideo() {
+    if (_videoController == null || !_videoController!.value.isInitialized) return;
+    final position = _videoController!.value.position;
+    final duration = _videoController!.value.duration;
+    final double seconds = position.inMilliseconds / 1000.0;
+    
+    if (mounted && (seconds - _currentTime).abs() > 0.01) {
+      // Use video proportion to directly map to data index
+      final videoDurationMs = duration.inMilliseconds;
+      final proportion = videoDurationMs > 0 
+          ? (position.inMilliseconds / videoDurationMs).clamp(0.0, 1.0) 
+          : 0.0;
+      _updateHeatmapForTime(seconds, proportion: proportion);
+      setState(() {
+        _currentTime = seconds;
+      });
     }
   }
 
@@ -650,8 +674,9 @@ class _PlaybackScreenState extends State<PlaybackScreen> {
             max: maxTime <= 0 ? 0.0 : maxTime,
             onChanged: (value) {
               final clamped = value.clamp(0.0, maxTime);
-              // Update heatmap & graph instantly
-              _updateHeatmapForTime(clamped);
+              // Calculate proportion for direct data mapping
+              final prop = maxTime > 0 ? (clamped / maxTime).clamp(0.0, 1.0) : 0.0;
+              _updateHeatmapForTime(clamped, proportion: prop);
               setState(() {
                 _currentTime = clamped;
               });
@@ -748,32 +773,36 @@ class _PlaybackScreenState extends State<PlaybackScreen> {
     });
   }
 
-  void _updateHeatmapForTime(double time) {
+  void _updateHeatmapForTime(double time, {double? proportion}) {
     // Find closest data point
     if (_dataPoints.isEmpty) return;
     
     int closestIndex = 0;
     
-    // Check if time values are relative (small numbers like 0.1, 0.2) or absolute (millisecond timestamps)
-    final firstTime = (_dataPoints.first['t'] as num).toDouble();
-    final lastTime = (_dataPoints.last['t'] as num).toDouble();
-    
-    if (firstTime > 1000000) {
-      // Absolute timestamps (milliseconds since epoch) - use proportional index
-      // Calculate data duration in seconds
-      final dataDurationSec = (lastTime - firstTime) / 1000.0;
-      final safeDuration = dataDurationSec > 0 ? dataDurationSec : 1.0;
-      final proportion = (time / safeDuration).clamp(0.0, 1.0);
+    if (proportion != null) {
+      // Direct proportion mapping (most accurate for video sync)
       closestIndex = (proportion * (_dataPoints.length - 1)).round().clamp(0, _dataPoints.length - 1);
     } else {
-      // Relative time values - use original matching logic
-      double minDiff = double.infinity;
-      for (int i = 0; i < _dataPoints.length; i++) {
-        final pointTime = (_dataPoints[i]['t'] as num).toDouble();
-        final diff = (pointTime - time).abs();
-        if (diff < minDiff) {
-          minDiff = diff;
-          closestIndex = i;
+      // Fallback: calculate from time
+      final firstTime = (_dataPoints.first['t'] as num).toDouble();
+      final lastTime = (_dataPoints.last['t'] as num).toDouble();
+      
+      if (firstTime > 1000000) {
+        // Absolute timestamps
+        final dataDurationSec = (lastTime - firstTime) / 1000.0;
+        final safeDuration = dataDurationSec > 0 ? dataDurationSec : 1.0;
+        final p = (time / safeDuration).clamp(0.0, 1.0);
+        closestIndex = (p * (_dataPoints.length - 1)).round().clamp(0, _dataPoints.length - 1);
+      } else {
+        // Relative time values
+        double minDiff = double.infinity;
+        for (int i = 0; i < _dataPoints.length; i++) {
+          final pointTime = (_dataPoints[i]['t'] as num).toDouble();
+          final diff = (pointTime - time).abs();
+          if (diff < minDiff) {
+            minDiff = diff;
+            closestIndex = i;
+          }
         }
       }
     }
