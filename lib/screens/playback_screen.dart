@@ -4,6 +4,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:intl/intl.dart';
 import 'package:golf_force_plate/widgets/smooth_heatmap.dart';
+import 'package:golf_force_plate/widgets/combined_heatmap.dart';
 import 'package:video_player/video_player.dart';
 import 'dart:io';
 
@@ -28,6 +29,9 @@ class _PlaybackScreenState extends State<PlaybackScreen> {
   // Pre-computed heatmap frames for instant playback
   List<List<List<double>>> _precomputedLeft = [];
   List<List<List<double>>> _precomputedRight = [];
+  // Pre-computed CoP trace (unified across both feet)
+  List<Offset> _copTraceCombined = [];
+  int _currentFrameIndex = 0;
   String _currentSwingPhase = 'Ready';
   
   VideoPlayerController? _videoController;
@@ -476,22 +480,11 @@ class _PlaybackScreenState extends State<PlaybackScreen> {
           const SizedBox(height: 8),
           // Using SmoothHeatmap - smooth gradient heatmap
           Expanded(
-            child: Row(
-              children: [
-                Expanded(
-                  child: SmoothHeatmap(
-                    pressureData: _leftFootPressure,
-                    isLeftFoot: true,
-                  ),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: SmoothHeatmap(
-                    pressureData: _rightFootPressure,
-                    isLeftFoot: false,
-                  ),
-                ),
-              ],
+            child: CombinedHeatmap(
+              leftPressureData: _leftFootPressure,
+              rightPressureData: _rightFootPressure,
+              copTrace: _copTraceCombined,
+              currentTraceIndex: _currentFrameIndex,
             ),
           ),
         ],
@@ -792,35 +785,100 @@ class _PlaybackScreenState extends State<PlaybackScreen> {
   void _precomputeHeatmapFrames() {
     _precomputedLeft = [];
     _precomputedRight = [];
+    _copTraceCombined = [];
     const double maxRawValue = 4095.0;
 
     for (final point in _dataPoints) {
+      List<List<double>> left;
+      List<List<double>> right;
+
       if (point.containsKey('raw_left') && point['raw_left'] != null) {
         try {
-          final left = (point['raw_left'] as List).map((row) {
+          left = (point['raw_left'] as List).map((row) {
             return (row as List).map((val) {
               final rawVal = (val as num).toDouble();
               return (rawVal / maxRawValue * 100.0).clamp(0.0, 100.0);
             }).toList();
           }).toList();
-          final right = (point['raw_right'] as List).map((row) {
+          right = (point['raw_right'] as List).map((row) {
             return (row as List).map((val) {
               final rawVal = (val as num).toDouble();
               return (rawVal / maxRawValue * 100.0).clamp(0.0, 100.0);
             }).toList();
           }).toList();
-          _precomputedLeft.add(left);
-          _precomputedRight.add(right);
-          continue;
-        } catch (_) {}
+        } catch (_) {
+          final leftWeight = (point['l'] as num).toDouble();
+          final rightWeight = (point['r'] as num).toDouble();
+          left = _generateHeatmapFromWeight(leftWeight, true);
+          right = _generateHeatmapFromWeight(rightWeight, false);
+        }
+      } else {
+        final leftWeight = (point['l'] as num).toDouble();
+        final rightWeight = (point['r'] as num).toDouble();
+        left = _generateHeatmapFromWeight(leftWeight, true);
+        right = _generateHeatmapFromWeight(rightWeight, false);
       }
-      // Fallback: generate from weight values
-      final leftWeight = (point['l'] as num).toDouble();
-      final rightWeight = (point['r'] as num).toDouble();
-      _precomputedLeft.add(_generateHeatmapFromWeight(leftWeight, true));
-      _precomputedRight.add(_generateHeatmapFromWeight(rightWeight, false));
+
+      _precomputedLeft.add(left);
+      _precomputedRight.add(right);
+
+      // Compute unified CoP across both feet
+      _copTraceCombined.add(_computeCombinedCoP(left, right));
     }
-    debugPrint('Pre-computed ${_precomputedLeft.length} heatmap frames');
+    debugPrint('Pre-computed ${_precomputedLeft.length} heatmap frames with unified CoP');
+  }
+
+  /// Calculate unified Center of Pressure across both feet
+  /// Left foot occupies X range 0.0-0.5, Right foot occupies 0.5-1.0
+  /// Returns normalized Offset (0.0-1.0) where:
+  ///   dx < 0.5 = weight biased LEFT, dx > 0.5 = weight biased RIGHT
+  ///   dy = front-to-back position (0=toe, 1=heel)
+  Offset _computeCombinedCoP(List<List<double>> leftGrid, List<List<double>> rightGrid) {
+    double totalPressure = 0;
+    double weightedX = 0;
+    double weightedY = 0;
+
+    final rows = leftGrid.length;
+    final cols = leftGrid.isNotEmpty ? leftGrid[0].length : 0;
+
+    // Process left foot (X range: 0.0 to 0.5)
+    for (int r = 0; r < rows; r++) {
+      for (int c = 0; c < cols; c++) {
+        final p = leftGrid[r][c];
+        if (p > 0) {
+          totalPressure += p;
+          // Map col to 0.0-0.5 range (left half)
+          final x = cols > 1 ? (c / (cols - 1)) * 0.5 : 0.25;
+          final y = rows > 1 ? r / (rows - 1) : 0.5;
+          weightedX += p * x;
+          weightedY += p * y;
+        }
+      }
+    }
+
+    // Process right foot (X range: 0.5 to 1.0)
+    final rRows = rightGrid.length;
+    final rCols = rightGrid.isNotEmpty ? rightGrid[0].length : 0;
+    for (int r = 0; r < rRows; r++) {
+      for (int c = 0; c < rCols; c++) {
+        final p = rightGrid[r][c];
+        if (p > 0) {
+          totalPressure += p;
+          // Map col to 0.5-1.0 range (right half)
+          final x = rCols > 1 ? 0.5 + (c / (rCols - 1)) * 0.5 : 0.75;
+          final y = rRows > 1 ? r / (rRows - 1) : 0.5;
+          weightedX += p * x;
+          weightedY += p * y;
+        }
+      }
+    }
+
+    if (totalPressure < 0.01) return const Offset(0.5, 0.5);
+
+    return Offset(
+      (weightedX / totalPressure).clamp(0.0, 1.0),
+      (weightedY / totalPressure).clamp(0.0, 1.0),
+    );
   }
 
   void _updateHeatmapForTime(double time, {double? proportion}) {
@@ -836,9 +894,10 @@ class _PlaybackScreenState extends State<PlaybackScreen> {
       index = (p * (_precomputedLeft.length - 1)).round().clamp(0, _precomputedLeft.length - 1);
     }
     
-    // O(1) lookup - no parsing, no allocation
+    // O(1) lookup
     _leftFootPressure = _precomputedLeft[index];
     _rightFootPressure = _precomputedRight[index];
+    _currentFrameIndex = index;
   }
 
   void _useGeneratedHeatmap(Map<String, dynamic> point) {

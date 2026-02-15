@@ -5,6 +5,7 @@ import 'package:fl_chart/fl_chart.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:golf_force_plate/theme.dart'; // Import theme definitions
 import 'package:golf_force_plate/widgets/smooth_heatmap.dart';
+import 'package:golf_force_plate/widgets/combined_heatmap.dart';
 import 'package:golf_force_plate/screens/sensor_display_screen.dart';
 import 'package:golf_force_plate/screens/auth_screen.dart';
 import 'package:camera/camera.dart';
@@ -36,6 +37,7 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
   // Heatmap data
   List<List<double>> _leftFootPressure = [];
   List<List<double>> _rightFootPressure = [];
+  Offset _liveCoP = const Offset(0.5, 0.5); // Live Center of Pressure
   bool _showHeatmap = true;
 
   // Force tracking (matching Processing Ver2 logic)
@@ -666,9 +668,38 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
 
         _leftFootPressure = leftHeatmap;
         _rightFootPressure = rightHeatmap;
+
+        // Compute live CoP across both feet
+        _liveCoP = _computeLiveCoP(leftHeatmap, rightHeatmap);
       });
   }
 
+  /// Compute unified Center of Pressure across both feet (live)
+  /// Left foot occupies X 0.0-0.5, Right foot occupies X 0.5-1.0
+  Offset _computeLiveCoP(List<List<double>> leftGrid, List<List<double>> rightGrid) {
+    double totalP = 0, wx = 0, wy = 0;
+
+    void processGrid(List<List<double>> grid, double xOffset, double xScale) {
+      final rows = grid.length;
+      final cols = rows > 0 ? grid[0].length : 0;
+      for (int r = 0; r < rows; r++) {
+        for (int c = 0; c < cols; c++) {
+          final p = grid[r][c];
+          if (p > 0) {
+            totalP += p;
+            wx += p * (xOffset + (cols > 1 ? c / (cols - 1) : 0.5) * xScale);
+            wy += p * (rows > 1 ? r / (rows - 1) : 0.5);
+          }
+        }
+      }
+    }
+
+    processGrid(leftGrid, 0.0, 0.5);   // left half
+    processGrid(rightGrid, 0.5, 0.5);  // right half
+
+    if (totalP < 0.01) return const Offset(0.5, 0.5);
+    return Offset((wx / totalP).clamp(0.0, 1.0), (wy / totalP).clamp(0.0, 1.0));
+  }
   @override
   void dispose() {
     _simulationTimer?.cancel();
@@ -1231,26 +1262,13 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
           ],
         ),
         const SizedBox(height: 8),
-        // Using SmoothHeatmap - smooth gradient heatmap
         Expanded(
-          child: Row(
-            children: [
-              Expanded(
-                child: SmoothHeatmap(
-                  pressureData: _leftFootPressure,
-                  isLeftFoot: true,
-                  onTap: () => _updateHeatmapData(),
-                ),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: SmoothHeatmap(
-                  pressureData: _rightFootPressure,
-                  isLeftFoot: false,
-                  onTap: () => _updateHeatmapData(),
-                ),
-              ),
-            ],
+          child: CombinedHeatmap(
+            leftPressureData: _leftFootPressure,
+            rightPressureData: _rightFootPressure,
+            copTrace: [_liveCoP],
+            currentTraceIndex: 0,
+            onTap: () => _updateHeatmapData(),
           ),
         ),
         const SizedBox(height: 16),
