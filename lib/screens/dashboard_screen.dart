@@ -355,6 +355,19 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
   Future<void> _startAutoRecording() async {
     if (!mounted) return;
     
+    // Start video recording FIRST (async, takes time to init)
+    if (_cameraController != null && 
+        _cameraController!.value.isInitialized && 
+        !_cameraController!.value.isRecordingVideo) {
+      try {
+        await _cameraController!.startVideoRecording();
+      } catch (e) {
+        debugPrint('Error starting video recording: $e');
+      }
+    }
+    
+    // Reset data buffer AFTER video starts → both start at the same time
+    if (!mounted) return;
     setState(() {
       _isRecording = true;
       _isSwinging = true;
@@ -366,17 +379,6 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
       _graphXValue = 0;
       _lowForceCounter = 0;
     });
-    
-    // Start video recording
-    if (_cameraController != null && 
-        _cameraController!.value.isInitialized && 
-        !_cameraController!.value.isRecordingVideo) {
-      try {
-        await _cameraController!.startVideoRecording();
-      } catch (e) {
-        debugPrint('Error starting video recording: $e');
-      }
-    }
     
     debugPrint('Auto-recording started');
   }

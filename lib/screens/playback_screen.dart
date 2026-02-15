@@ -19,11 +19,15 @@ class PlaybackScreen extends StatefulWidget {
 class _PlaybackScreenState extends State<PlaybackScreen> {
   Future<Map<String, dynamic>?>? _swingDataFuture;
   double _currentTime = 0.0;
+  double _playbackProportion = 0.0; // 0.0 to 1.0 - unified sync source
   bool _isPlaying = false;
   Timer? _playbackTimer;
   List<Map<String, dynamic>> _dataPoints = [];
   List<List<double>> _leftFootPressure = [];
   List<List<double>> _rightFootPressure = [];
+  // Pre-computed heatmap frames for instant playback
+  List<List<List<double>>> _precomputedLeft = [];
+  List<List<List<double>>> _precomputedRight = [];
   String _currentSwingPhase = 'Ready';
   
   VideoPlayerController? _videoController;
@@ -85,6 +89,7 @@ class _PlaybackScreenState extends State<PlaybackScreen> {
           if (_dataPoints.isEmpty) {
             _dataPoints = dataPoints;
             _loadHeatmapData(swingData);
+            _precomputeHeatmapFrames();
             WidgetsBinding.instance.addPostFrameCallback((_) {
               _initializeVideo(swingData);
             });
@@ -251,9 +256,9 @@ class _PlaybackScreenState extends State<PlaybackScreen> {
         if (mounted) setState(() => _isPlaying = isPlaying);
       }
 
-      // Start high-frequency sync timer when playing
+      // Start high-frequency sync timer when playing (~60fps)
       if (isPlaying && _syncTimer == null) {
-        _syncTimer = Timer.periodic(const Duration(milliseconds: 50), (_) {
+        _syncTimer = Timer.periodic(const Duration(milliseconds: 16), (_) {
           _syncHeatmapWithVideo();
         });
       } else if (!isPlaying && _syncTimer != null) {
@@ -288,6 +293,7 @@ class _PlaybackScreenState extends State<PlaybackScreen> {
       _updateHeatmapForTime(seconds, proportion: proportion);
       setState(() {
         _currentTime = seconds;
+        _playbackProportion = proportion;
       });
     }
   }
@@ -582,7 +588,7 @@ class _PlaybackScreenState extends State<PlaybackScreen> {
           const SizedBox(height: 8),
           Expanded(
             child: LineChart(
-              _buildPlaybackChartData(leftDataPoints, rightDataPoints, _currentTime),
+              _buildPlaybackChartData(leftDataPoints, rightDataPoints, _playbackProportion),
             ),
           ),
         ],
@@ -612,17 +618,19 @@ class _PlaybackScreenState extends State<PlaybackScreen> {
   }
 
   Widget _buildTimelineControl(int totalDataPoints) {
-    // Calculate maxTime in relative seconds (matching chart X-axis conversion)
+    // Calculate maxTime: prefer video duration when available
     double maxTime = 0.0;
-    if (_dataPoints.isNotEmpty) {
+    if (_hasVideo && _videoController != null && _videoController!.value.isInitialized) {
+      maxTime = _videoController!.value.duration.inMilliseconds / 1000.0;
+    } else if (_dataPoints.isNotEmpty) {
       final firstTime = (_dataPoints.first['t'] as num).toDouble();
       final lastTime = (_dataPoints.last['t'] as num).toDouble();
-      final isAbsoluteTimestamp = firstTime > 1000000; // Epoch milliseconds
+      final isAbsoluteTimestamp = firstTime > 1000000;
       
       if (isAbsoluteTimestamp) {
-        maxTime = (lastTime - firstTime) / 1000.0; // Convert ms to seconds
+        maxTime = (lastTime - firstTime) / 1000.0;
       } else {
-        maxTime = lastTime; // Already relative seconds
+        maxTime = lastTime;
       }
     }
     
@@ -679,6 +687,7 @@ class _PlaybackScreenState extends State<PlaybackScreen> {
               _updateHeatmapForTime(clamped, proportion: prop);
               setState(() {
                 _currentTime = clamped;
+                _playbackProportion = prop;
               });
               // Seek video in real-time (scrubbing)
               if (_hasVideo && _videoController != null) {
@@ -738,16 +747,21 @@ class _PlaybackScreenState extends State<PlaybackScreen> {
         }
         
         if (_currentTime >= maxTime) {
-          _updateHeatmapForTime(_currentTime);
+          final prop = maxTime > 0 ? 1.0 : 0.0;
+          _updateHeatmapForTime(_currentTime, proportion: prop);
           setState(() {
             _currentTime = maxTime;
+            _playbackProportion = prop;
           });
           _pausePlayback();
           return;
         }
-        _updateHeatmapForTime(_currentTime + 0.1);
+        final newTime = (_currentTime + 0.1).clamp(0.0, maxTime);
+        final prop = maxTime > 0 ? (newTime / maxTime).clamp(0.0, 1.0) : 0.0;
+        _updateHeatmapForTime(newTime, proportion: prop);
         setState(() {
-          _currentTime = (_currentTime + 0.1).clamp(0.0, maxTime);
+          _currentTime = newTime;
+          _playbackProportion = prop;
         });
       });
     }
@@ -767,74 +781,64 @@ class _PlaybackScreenState extends State<PlaybackScreen> {
     if (_hasVideo && _videoController != null) {
       _videoController!.seekTo(Duration.zero);
     }
+    _updateHeatmapForTime(0.0, proportion: 0.0);
     setState(() {
       _currentTime = 0.0;
-      _updateHeatmapForTime(0.0);
+      _playbackProportion = 0.0;
     });
   }
 
+  /// Pre-compute all heatmap frames at load time for instant playback
+  void _precomputeHeatmapFrames() {
+    _precomputedLeft = [];
+    _precomputedRight = [];
+    const double maxRawValue = 4095.0;
+
+    for (final point in _dataPoints) {
+      if (point.containsKey('raw_left') && point['raw_left'] != null) {
+        try {
+          final left = (point['raw_left'] as List).map((row) {
+            return (row as List).map((val) {
+              final rawVal = (val as num).toDouble();
+              return (rawVal / maxRawValue * 100.0).clamp(0.0, 100.0);
+            }).toList();
+          }).toList();
+          final right = (point['raw_right'] as List).map((row) {
+            return (row as List).map((val) {
+              final rawVal = (val as num).toDouble();
+              return (rawVal / maxRawValue * 100.0).clamp(0.0, 100.0);
+            }).toList();
+          }).toList();
+          _precomputedLeft.add(left);
+          _precomputedRight.add(right);
+          continue;
+        } catch (_) {}
+      }
+      // Fallback: generate from weight values
+      final leftWeight = (point['l'] as num).toDouble();
+      final rightWeight = (point['r'] as num).toDouble();
+      _precomputedLeft.add(_generateHeatmapFromWeight(leftWeight, true));
+      _precomputedRight.add(_generateHeatmapFromWeight(rightWeight, false));
+    }
+    debugPrint('Pre-computed ${_precomputedLeft.length} heatmap frames');
+  }
+
   void _updateHeatmapForTime(double time, {double? proportion}) {
-    // Find closest data point
-    if (_dataPoints.isEmpty) return;
+    if (_precomputedLeft.isEmpty) return;
     
-    int closestIndex = 0;
-    
+    int index;
     if (proportion != null) {
-      // Direct proportion mapping (most accurate for video sync)
-      closestIndex = (proportion * (_dataPoints.length - 1)).round().clamp(0, _dataPoints.length - 1);
+      index = (proportion * (_precomputedLeft.length - 1)).round().clamp(0, _precomputedLeft.length - 1);
     } else {
-      // Fallback: calculate from time
-      final firstTime = (_dataPoints.first['t'] as num).toDouble();
-      final lastTime = (_dataPoints.last['t'] as num).toDouble();
-      
-      if (firstTime > 1000000) {
-        // Absolute timestamps
-        final dataDurationSec = (lastTime - firstTime) / 1000.0;
-        final safeDuration = dataDurationSec > 0 ? dataDurationSec : 1.0;
-        final p = (time / safeDuration).clamp(0.0, 1.0);
-        closestIndex = (p * (_dataPoints.length - 1)).round().clamp(0, _dataPoints.length - 1);
-      } else {
-        // Relative time values
-        double minDiff = double.infinity;
-        for (int i = 0; i < _dataPoints.length; i++) {
-          final pointTime = (_dataPoints[i]['t'] as num).toDouble();
-          final diff = (pointTime - time).abs();
-          if (diff < minDiff) {
-            minDiff = diff;
-            closestIndex = i;
-          }
-        }
-      }
+      final p = _dataPoints.isNotEmpty
+          ? (time / ((_dataPoints.last['t'] as num).toDouble() - (_dataPoints.first['t'] as num).toDouble()) * 1000.0).clamp(0.0, 1.0)
+          : 0.0;
+      index = (p * (_precomputedLeft.length - 1)).round().clamp(0, _precomputedLeft.length - 1);
     }
     
-    final point = _dataPoints[closestIndex];
-    
-    // Update heatmap data (caller is responsible for setState)
-    if (point.containsKey('raw_left') && point['raw_left'] != null) {
-      try {
-        // Normalize raw sensor values (0-4095) to display values (0-100)
-        const double maxRawValue = 4095.0;
-        _leftFootPressure = (point['raw_left'] as List).map((row) {
-          return (row as List).map((val) {
-            final rawVal = (val as num).toDouble();
-            return (rawVal / maxRawValue * 100.0).clamp(0.0, 100.0);
-          }).toList();
-        }).toList();
-        
-        _rightFootPressure = (point['raw_right'] as List).map((row) {
-          return (row as List).map((val) {
-            final rawVal = (val as num).toDouble();
-            return (rawVal / maxRawValue * 100.0).clamp(0.0, 100.0);
-          }).toList();
-        }).toList();
-      } catch (e) {
-        debugPrint('Error parsing heatmap data: $e');
-        // Fallback
-        _useGeneratedHeatmap(point);
-      }
-    } else {
-      _useGeneratedHeatmap(point);
-    }
+    // O(1) lookup - no parsing, no allocation
+    _leftFootPressure = _precomputedLeft[index];
+    _rightFootPressure = _precomputedRight[index];
   }
 
   void _useGeneratedHeatmap(Map<String, dynamic> point) {
@@ -885,11 +889,13 @@ class _PlaybackScreenState extends State<PlaybackScreen> {
   LineChartData _buildPlaybackChartData(
     List<FlSpot> leftSpots,
     List<FlSpot> rightSpots,
-    double currentTimeX, // Current playback position
+    double proportion, // 0.0 to 1.0 playback progress
   ) {
     // Get min and max X values from data
     final minX = leftSpots.isNotEmpty ? leftSpots.first.x : 0.0;
     final maxX = leftSpots.isNotEmpty ? leftSpots.last.x : 1.0;
+    // Convert proportion to data-relative X position (matches graph X-axis)
+    final currentTimeX = minX + proportion * (maxX - minX);
     
     return LineChartData(
       gridData: FlGridData(
