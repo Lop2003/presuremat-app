@@ -652,13 +652,12 @@ class _PlaybackScreenState extends State<PlaybackScreen> {
             max: maxTime <= 0 ? 0.0 : maxTime,
             onChanged: (value) {
               final clamped = value.clamp(0.0, maxTime);
-              // Update heatmap data first
+              // Update heatmap & graph instantly
               _updateHeatmapForTime(clamped);
-              // Then trigger rebuild with new time and heatmap data
               setState(() {
                 _currentTime = clamped;
               });
-              // Seek video if available
+              // Seek video in real-time (scrubbing)
               if (_hasVideo && _videoController != null) {
                 _videoController!.seekTo(Duration(milliseconds: (clamped * 1000).toInt()));
               }
