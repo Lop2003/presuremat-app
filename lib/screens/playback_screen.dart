@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:intl/intl.dart';
-import 'package:golf_force_plate/widgets/simple_grid_heatmap.dart';
+import 'package:golf_force_plate/widgets/smooth_heatmap.dart';
 import 'package:video_player/video_player.dart';
 import 'dart:io';
 
@@ -445,20 +445,20 @@ class _PlaybackScreenState extends State<PlaybackScreen> {
             ],
           ),
           const SizedBox(height: 8),
-          // Using SimpleGridHeatmap - simple 5x5 grids
+          // Using SmoothHeatmap - smooth gradient heatmap
           SizedBox(
             height: 140,
             child: Row(
               children: [
                 Expanded(
-                  child: SimpleGridHeatmap(
+                  child: SmoothHeatmap(
                     pressureData: _leftFootPressure,
                     isLeftFoot: true,
                   ),
                 ),
                 const SizedBox(width: 16),
                 Expanded(
-                  child: SimpleGridHeatmap(
+                  child: SmoothHeatmap(
                     pressureData: _rightFootPressure,
                     isLeftFoot: false,
                   ),

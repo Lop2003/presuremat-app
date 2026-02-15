@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:golf_force_plate/theme.dart'; // Import theme definitions
-import 'package:golf_force_plate/widgets/simple_grid_heatmap.dart';
+import 'package:golf_force_plate/widgets/smooth_heatmap.dart';
 import 'package:golf_force_plate/screens/sensor_display_screen.dart';
 import 'package:golf_force_plate/screens/auth_screen.dart';
 import 'package:camera/camera.dart';
@@ -1229,12 +1229,12 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
           ],
         ),
         const SizedBox(height: 8),
-        // Using SimpleGridHeatmap - simple 5x5 grids
+        // Using SmoothHeatmap - smooth gradient heatmap
         Expanded(
           child: Row(
             children: [
               Expanded(
-                child: SimpleGridHeatmap(
+                child: SmoothHeatmap(
                   pressureData: _leftFootPressure,
                   isLeftFoot: true,
                   onTap: () => _updateHeatmapData(),
@@ -1242,7 +1242,7 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
               ),
               const SizedBox(width: 16),
               Expanded(
-                child: SimpleGridHeatmap(
+                child: SmoothHeatmap(
                   pressureData: _rightFootPressure,
                   isLeftFoot: false,
                   onTap: () => _updateHeatmapData(),
