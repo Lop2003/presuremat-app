@@ -130,7 +130,7 @@ class _PlaybackScreenState extends State<PlaybackScreen> {
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // Left Column: Video & Heatmap
+                      // Left Column: Video & Chart
                       Expanded(
                         flex: 1, // 50% width
                         child: Column(
@@ -139,20 +139,20 @@ class _PlaybackScreenState extends State<PlaybackScreen> {
                               Expanded(child: _buildVideoSection()),
                               const SizedBox(height: 16),
                             ],
-                            // Heatmap takes remaining space or fixed space if video is present
+                            // Chart takes remaining space or fixed space if video is present
                             _hasVideo 
-                                ? SizedBox(height: 250, child: _buildHeatmapSection()) 
-                                : Expanded(child: _buildHeatmapSection()),
+                                ? SizedBox(height: 250, child: _buildChartSection(leftDataPoints, rightDataPoints)) 
+                                : Expanded(child: _buildChartSection(leftDataPoints, rightDataPoints)),
                           ],
                         ),
                       ),
                       const SizedBox(width: 16),
-                      // Right Column: Chart & Controls
+                      // Right Column: Heatmap & Controls
                       Expanded(
                         flex: 1, // 50% width
                         child: Column(
                           children: [
-                            Expanded(child: _buildChartSection(leftDataPoints, rightDataPoints)),
+                            Expanded(child: _buildHeatmapSection()),
                             const SizedBox(height: 16),
                             _buildTimelineControl(dataPoints.length),
                           ],
@@ -408,7 +408,6 @@ class _PlaybackScreenState extends State<PlaybackScreen> {
         ],
       ),
       child: Column(
-        mainAxisSize: MainAxisSize.min, // Prevent overflow
         children: [
           Row(
             children: [
@@ -446,8 +445,7 @@ class _PlaybackScreenState extends State<PlaybackScreen> {
           ),
           const SizedBox(height: 8),
           // Using SmoothHeatmap - smooth gradient heatmap
-          SizedBox(
-            height: 140,
+          Expanded(
             child: Row(
               children: [
                 Expanded(

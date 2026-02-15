@@ -694,7 +694,7 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    // Left Column: Camera + Heatmap
+                    // Left Column: Camera + Chart
                     Expanded(
                       flex: 1,
                       child: Column(
@@ -702,14 +702,13 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
                           // Camera Preview
                           Expanded(flex: 3, child: _buildCameraPreview()),
                           const SizedBox(height: 12),
-                          // Heatmap (increased height)
-                          if (_showHeatmap)
-                            Expanded(flex: 3, child: _buildHeatmapSection()),
+                          // Chart
+                          Expanded(flex: 4, child: _buildChartCard()),
                         ],
                       ),
                     ),
                     const SizedBox(width: 16),
-                    // Right Column: Balance + Chart + Record
+                    // Right Column: Balance + Heatmap + Record
                     Expanded(
                       flex: 1,
                       child: Column(
@@ -717,8 +716,9 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
                           // Balance Bar (compact)
                           _buildWeightCards(),
                           const SizedBox(height: 12),
-                          // Chart (takes most space)
-                          Expanded(child: _buildChartCard()),
+                          // Heatmap (takes most space)
+                          if (_showHeatmap)
+                            Expanded(child: _buildHeatmapSection()),
                           const SizedBox(height: 12),
                           // Record Button (compact)
                           SizedBox(height: 50, child: _buildRecordButton()),
