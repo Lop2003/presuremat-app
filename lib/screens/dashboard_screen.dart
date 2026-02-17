@@ -120,6 +120,123 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
     setState(() {});
   }
 
+  // --- Save Loading Modal Helpers ---
+  void _showSaveLoadingDialog(String message) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      barrierColor: Colors.black54,
+      builder: (ctx) => PopScope(
+        canPop: false,
+        child: Center(
+          child: Container(
+            width: 260,
+            padding: const EdgeInsets.symmetric(vertical: 28, horizontal: 24),
+            decoration: BoxDecoration(
+              color: const Color(0xFF1E293B),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: Colors.white.withOpacity(0.08)),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const SizedBox(
+                  width: 40, height: 40,
+                  child: CircularProgressIndicator(color: Colors.cyanAccent, strokeWidth: 3),
+                ),
+                const SizedBox(height: 20),
+                Text(message,
+                  style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600, decoration: TextDecoration.none),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 6),
+                Text('Please wait...',
+                  style: TextStyle(color: Colors.white.withOpacity(0.4), fontSize: 11, decoration: TextDecoration.none),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showSaveResultDialog({required bool success, String? errorMsg}) {
+    // Dismiss loading dialog
+    if (mounted && Navigator.canPop(context)) Navigator.pop(context);
+
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      barrierColor: Colors.black38,
+      builder: (ctx) => Center(
+        child: Container(
+          width: 260,
+          padding: const EdgeInsets.symmetric(vertical: 28, horizontal: 24),
+          decoration: BoxDecoration(
+            color: const Color(0xFF1E293B),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: (success ? Colors.greenAccent : Colors.redAccent).withOpacity(0.2)),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: (success ? Colors.greenAccent : Colors.redAccent).withOpacity(0.15),
+                ),
+                child: Icon(
+                  success ? Icons.check_circle : Icons.error_outline,
+                  color: success ? Colors.greenAccent : Colors.redAccent,
+                  size: 36,
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                success ? 'Saved Successfully' : 'Save Failed',
+                style: TextStyle(
+                  color: success ? Colors.greenAccent : Colors.redAccent,
+                  fontSize: 16, fontWeight: FontWeight.w700, decoration: TextDecoration.none,
+                ),
+              ),
+              if (!success && errorMsg != null) ...[
+                const SizedBox(height: 8),
+                Text(errorMsg,
+                  style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 11, decoration: TextDecoration.none),
+                  textAlign: TextAlign.center, maxLines: 3, overflow: TextOverflow.ellipsis,
+                ),
+              ],
+              const SizedBox(height: 16),
+              SizedBox(
+                width: double.infinity,
+                height: 38,
+                child: ElevatedButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: (success ? Colors.greenAccent : Colors.redAccent).withOpacity(0.15),
+                    foregroundColor: success ? Colors.greenAccent : Colors.redAccent,
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                  child: const Text('OK', style: TextStyle(fontWeight: FontWeight.w600)),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    // Auto-dismiss success dialog after 2 seconds
+    if (success) {
+      Future.delayed(const Duration(seconds: 2), () {
+        if (mounted && Navigator.canPop(context)) Navigator.pop(context);
+      });
+    }
+  }
+
   Future<void> _saveSwingSession(
     List<FlSpot> leftData,
     List<FlSpot> rightData, {
@@ -128,7 +245,10 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
   }) async {
     final user = _supabase.auth.currentUser;
     if (user == null) return;
-    
+
+    // Show loading modal
+    if (mounted) _showSaveLoadingDialog(videoPath != null ? 'Uploading video...' : 'Saving session...');
+
     String? publicVideoUrl;
     if (videoPath != null) {
       final videoFile = File(videoPath);
@@ -183,25 +303,9 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
 
       await _supabase.from('swings').insert(sessionData);
 
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('Session saved successfully'),
-            backgroundColor: AppColors.primary,
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-          ),
-        );
-      }
+      if (mounted) _showSaveResultDialog(success: true);
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to save session: $e'),
-            backgroundColor: AppColors.error,
-          ),
-        );
-      }
+      if (mounted) _showSaveResultDialog(success: false, errorMsg: '$e');
     }
   }
 
