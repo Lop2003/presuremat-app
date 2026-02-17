@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:golf_force_plate/screens/dashboard_screen.dart';
 import 'package:golf_force_plate/screens/history_screen.dart';
-import 'package:golf_force_plate/screens/profile_screen.dart';
 import 'package:golf_force_plate/screens/sensor_display_screen.dart';
 
 class MainScreen extends StatefulWidget {
@@ -18,7 +17,6 @@ class _MainScreenState extends State<MainScreen> {
     const PresentationDashboard(),
     const HistoryScreen(),
     const SensorDisplayScreen(),
-    const ProfileScreen(),
   ];
 
   @override
@@ -76,11 +74,7 @@ class _MainScreenState extends State<MainScreen> {
               activeIcon: Icon(Icons.sensors, size: 28),
               label: 'Sensor',
             ),
-            BottomNavigationBarItem(
-              icon: Icon(Icons.person),
-              activeIcon: Icon(Icons.person, size: 28),
-              label: 'Profile',
-            ),
+
           ],
         ),
       ),

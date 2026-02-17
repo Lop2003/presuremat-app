@@ -901,7 +901,7 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Force Plate',
+                'Pressure Map',
                 style: Theme.of(context).textTheme.titleLarge?.copyWith(
                   color: Colors.white,
                   letterSpacing: 0.5,
