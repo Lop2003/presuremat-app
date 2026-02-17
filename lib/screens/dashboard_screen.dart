@@ -115,15 +115,8 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
   void _initializeGraphWithBaseline() {
     _leftDataPoints.clear();
     _rightDataPoints.clear();
+    _totalForceDataPoints.clear();
     _graphXValue = 0;
-
-    for (int i = 0; i < 20; i++) {
-      double x = i * 0.1;
-      _leftDataPoints.add(FlSpot(x, 50.0));
-      _rightDataPoints.add(FlSpot(x, 50.0));
-      _graphXValue = x;
-    }
-
     setState(() {});
   }
 
