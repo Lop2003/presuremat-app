@@ -70,6 +70,8 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
   int _lowForceCounter = 0;             // Count frames below threshold
   static const int _stopDelay = 15;     // Frames to wait before auto-stop (~1.5 sec at 100ms)
 
+
+
   @override
   void initState() {
     super.initState();
@@ -87,7 +89,46 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
       // Subscribe to data stream
       _serialSubscription?.cancel();
       _serialSubscription = _serialService.dataStream.listen(_processSerialData);
+      
+      // Show calibration modal only if NOT calibrated
+      if (!_serialService.isCalibrated) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _showCalibrationModal();
+        });
+      }
     }
+  }
+
+  // --- Calibration ---
+  // --- Calibration ---
+  void _showCalibrationModal() {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      barrierColor: Colors.black87,
+      builder: (ctx) => _CalibrationDialog(
+        onSkip: () => Navigator.of(ctx).pop(),
+        onCalibrationComplete: (baseline) {
+          Navigator.of(ctx).pop();
+          // Force UI update
+          setState(() {}); 
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Row(
+                children: [
+                  const Icon(Icons.check_circle, color: Colors.white, size: 18),
+                  const SizedBox(width: 8),
+                  Text('Calibrated! Baseline: ${baseline.toStringAsFixed(0)}'),
+                ],
+              ),
+              backgroundColor: const Color(0xFF10B981),
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+          );
+        },
+      ),
+    );
   }
 
   Future<void> _initializeCamera() async {
@@ -759,9 +800,15 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
         _leftDataPoints.add(FlSpot(_graphXValue, left));
         _rightDataPoints.add(FlSpot(_graphXValue, right));
         
-        // Normalize total force to 0-100 scale for graph display (max ~25000 for 25 sensors x 1000 each)
-        final normalizedForce = (totalForce / 30000.0 * 100.0).clamp(0.0, 100.0);
-        _totalForceDataPoints.add(FlSpot(_graphXValue, normalizedForce));
+        // xBW normalization: if calibrated, express as multiples of body weight
+        // xBW normalization: if calibrated, express as multiples of body weight
+        double grfValue;
+        if (_serialService.isCalibrated && _serialService.baselineForce > 0) {
+          grfValue = (totalForce / _serialService.baselineForce).clamp(0.0, 3.0);
+        } else {
+          grfValue = (totalForce / 30000.0 * 100.0).clamp(0.0, 100.0);
+        }
+        _totalForceDataPoints.add(FlSpot(_graphXValue, grfValue));
 
         _leftFootPressure = leftHeatmap;
         _rightFootPressure = rightHeatmap;
@@ -1255,35 +1302,69 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
   );
 
   Widget _buildGRFChartCard() => Container(
-    padding: const EdgeInsets.all(10),
-    decoration: BoxDecoration(
-      borderRadius: BorderRadius.circular(16),
-      color: AppColors.surfaceDark,
-      border: Border.all(color: Colors.white.withOpacity(0.05)),
-    ),
-    child: Column(
-      children: [
-        Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(4),
-              decoration: BoxDecoration(color: Colors.blueAccent.withOpacity(0.1), borderRadius: BorderRadius.circular(6)),
-              child: const Icon(Icons.fitness_center, color: Colors.blueAccent, size: 14),
-            ),
-            const SizedBox(width: 6),
-            const Text('Vertical Force (GRF)', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.blueAccent)),
-          ],
-        ),
-        const SizedBox(height: 4),
-        Expanded(
-          child: LineChart(
-            _buildGRFChartData(),
-            duration: const Duration(milliseconds: 0),
+  padding: const EdgeInsets.all(10),
+  decoration: BoxDecoration(
+    borderRadius: BorderRadius.circular(16),
+    color: AppColors.surfaceDark,
+    border: Border.all(color: Colors.white.withOpacity(0.05)),
+  ),
+  child: Column(
+    children: [
+      Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(4),
+            decoration: BoxDecoration(color: Colors.blueAccent.withOpacity(0.1), borderRadius: BorderRadius.circular(6)),
+            child: const Icon(Icons.fitness_center, color: Colors.blueAccent, size: 14),
           ),
+          const SizedBox(width: 6),
+          Text(
+            _serialService.isCalibrated ? 'GRF (xBW)' : 'Vertical Force (GRF)',
+            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.blueAccent),
+          ),
+          const Spacer(),
+          if (_isSerialConnected)
+            GestureDetector(
+              onTap: _showCalibrationModal,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: (_serialService.isCalibrated ? Colors.greenAccent : Colors.amber).withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      _serialService.isCalibrated ? Icons.check_circle : Icons.tune,
+                      size: 10,
+                      color: _serialService.isCalibrated ? Colors.greenAccent : Colors.amber,
+                    ),
+                    const SizedBox(width: 3),
+                    Text(
+                      _serialService.isCalibrated ? 'Calibrated' : 'Calibrate',
+                      style: TextStyle(
+                        fontSize: 9,
+                        fontWeight: FontWeight.w600,
+                        color: _serialService.isCalibrated ? Colors.greenAccent : Colors.amber,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+        ],
+      ),
+      const SizedBox(height: 4),
+      Expanded(
+        child: LineChart(
+          _buildGRFChartData(),
+          duration: const Duration(milliseconds: 0),
         ),
-      ],
-    ),
-  );
+      ),
+    ],
+  ),
+);
 
   Widget _buildHeatmapSection() => Container(
     padding: const EdgeInsets.all(24),
@@ -1418,6 +1499,8 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
     }
     return result;
   }
+
+
 
   Widget _buildRecordButton() {
     // When connected to serial: show auto-record status
@@ -1566,49 +1649,65 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
   }
 
   LineChartData _buildGRFChartData() {
-    return LineChartData(
-      clipData: const FlClipData.all(),
-      gridData: FlGridData(
-        show: true,
-        drawVerticalLine: false,
-        horizontalInterval: 25,
-        getDrawingHorizontalLine: (value) {
-          return FlLine(color: Colors.white.withOpacity(0.1), strokeWidth: 1);
-        },
-      ),
-      titlesData: FlTitlesData(
-        rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-        topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-        bottomTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-        leftTitles: AxisTitles(
-          sideTitles: SideTitles(
-            showTitles: true,
-            interval: 50,
-            getTitlesWidget: (value, meta) {
-              if (value == 100) return Padding(padding: const EdgeInsets.only(right: 4), child: Text('100', style: TextStyle(color: Colors.blueAccent.withOpacity(0.6), fontSize: 8, fontWeight: FontWeight.bold)));
-              if (value == 50) return Padding(padding: const EdgeInsets.only(right: 4), child: Text('50', style: TextStyle(color: Colors.blueAccent.withOpacity(0.6), fontSize: 8, fontWeight: FontWeight.bold)));
-              if (value == 0) return Padding(padding: const EdgeInsets.only(right: 4), child: Text('0', style: TextStyle(color: Colors.blueAccent.withOpacity(0.6), fontSize: 8, fontWeight: FontWeight.bold)));
-              return const SizedBox.shrink();
-            },
-            reservedSize: 28,
-          ),
+    final bool calibrated = _serialService.isCalibrated;
+  final double maxY = calibrated ? 3.0 : 100;
+  final double interval = calibrated ? 1.0 : 25;
+
+  return LineChartData(
+    clipData: const FlClipData.all(),
+    gridData: FlGridData(
+      show: true,
+      drawVerticalLine: false,
+      horizontalInterval: interval,
+      getDrawingHorizontalLine: (value) {
+        // Highlight the 1.0 BW line when calibrated
+        if (calibrated && (value - 1.0).abs() < 0.01) {
+          return FlLine(color: Colors.white.withOpacity(0.25), strokeWidth: 1, dashArray: [4, 4]);
+        }
+        return FlLine(color: Colors.white.withOpacity(0.1), strokeWidth: 1);
+      },
+    ),
+    titlesData: FlTitlesData(
+      rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+      topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+      bottomTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+      leftTitles: AxisTitles(
+        sideTitles: SideTitles(
+          showTitles: true,
+          interval: interval,
+          getTitlesWidget: (value, meta) {
+            final style = TextStyle(color: Colors.blueAccent.withOpacity(0.6), fontSize: 8, fontWeight: FontWeight.bold);
+            if (calibrated) {
+              if (value == 0) return Padding(padding: const EdgeInsets.only(right: 4), child: Text('0x', style: style));
+              if (value == 1) return Padding(padding: const EdgeInsets.only(right: 4), child: Text('1x', style: style));
+              if (value == 2) return Padding(padding: const EdgeInsets.only(right: 4), child: Text('2x', style: style));
+              if (value == 3) return Padding(padding: const EdgeInsets.only(right: 4), child: Text('3x', style: style));
+            } else {
+              if (value == 100) return Padding(padding: const EdgeInsets.only(right: 4), child: Text('100', style: style));
+              if (value == 50) return Padding(padding: const EdgeInsets.only(right: 4), child: Text('50', style: style));
+              if (value == 0) return Padding(padding: const EdgeInsets.only(right: 4), child: Text('0', style: style));
+            }
+            return const SizedBox.shrink();
+          },
+          reservedSize: 28,
         ),
       ),
-      borderData: FlBorderData(show: false),
-      minX: (_graphXValue - 2).clamp(0, double.infinity),
-      maxX: _graphXValue < 2 ? 2 : _graphXValue,
-      minY: 0,
-      maxY: 100,
-      lineBarsData: [
-        _createLineChartBarData(_totalForceDataPoints, Colors.blueAccent),
-      ],
-      lineTouchData: LineTouchData(
-        touchTooltipData: LineTouchTooltipData(
-          getTooltipColor: (touchedSpot) => AppColors.surfaceLight.withOpacity(0.9),
-        ),
+    ),
+    borderData: FlBorderData(show: false),
+    minX: (_graphXValue - 2).clamp(0, double.infinity),
+    maxX: _graphXValue < 2 ? 2 : _graphXValue,
+    minY: 0,
+    maxY: maxY,
+    lineBarsData: [
+      _createLineChartBarData(_totalForceDataPoints, Colors.blueAccent),
+    ],
+    lineTouchData: LineTouchData(
+      touchTooltipData: LineTouchTooltipData(
+        getTooltipColor: (touchedSpot) => AppColors.surfaceLight.withOpacity(0.9),
       ),
-    );
-  }
+    ),
+  );
+}
 
   LineChartBarData _createLineChartBarData(List<FlSpot> spots, Color color) {
     // Prevent empty list which causes chart overflow
@@ -1776,6 +1875,175 @@ class _LegendItem extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+class _CalibrationDialog extends StatefulWidget {
+  final Function(double) onCalibrationComplete;
+  final VoidCallback onSkip;
+
+  const _CalibrationDialog({
+    super.key,
+    required this.onCalibrationComplete,
+    required this.onSkip,
+  });
+
+  @override
+  State<_CalibrationDialog> createState() => _CalibrationDialogState();
+}
+
+class _CalibrationDialogState extends State<_CalibrationDialog> with SingleTickerProviderStateMixin {
+  int _step = 0; // 0: Waiting for user, 1: Countdown, 2: Calibrating
+  int _countdown = 3;
+  Timer? _timer;
+  late AnimationController _progressController;
+  
+  StreamSubscription<List<int>>? _sensorSubscription;
+  final SerialService _serialService = SerialService();
+  static const double _threshold = 300.0;
+  List<double> _samples = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _progressController = AnimationController(vsync: this, duration: const Duration(milliseconds: 3000));
+    _startListening();
+  }
+
+  @override
+  void dispose() {
+    _sensorSubscription?.cancel();
+    _timer?.cancel();
+    _progressController.dispose();
+    super.dispose();
+  }
+
+  void _startListening() {
+    if (_serialService.isConnected) {
+      _sensorSubscription = _serialService.dataStream.listen(_processSensorData);
+    }
+  }
+
+  void _processSensorData(List<int> sensors) {
+    if (!mounted) return;
+
+    double totalForce = 0;
+    int getValue(int index) => (index < sensors.length) ? sensors[index] : 0;
+    for (int i = 0; i < 25; i++) totalForce += getValue(32 + i);
+    for (int i = 0; i < 25; i++) totalForce += getValue(0 + i);
+
+    if (_step == 0) {
+      if (totalForce > _threshold) _startCountdown();
+    } else if (_step == 1) {
+      if (totalForce < _threshold) _resetToWaiting();
+    } else if (_step == 2) {
+      if (totalForce > _threshold) _samples.add(totalForce);
+    }
+  }
+
+  void _startCountdown() {
+    setState(() => _step = 1);
+    _countdown = 3;
+    _timer?.cancel();
+    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) { timer.cancel(); return; }
+      if (_countdown > 1) {
+        setState(() => _countdown--);
+      } else {
+        timer.cancel();
+        _startCalibrating();
+      }
+    });
+  }
+
+  void _resetToWaiting() {
+    _timer?.cancel();
+    setState(() {
+      _step = 0;
+      _countdown = 3;
+    });
+  }
+
+  void _startCalibrating() {
+    if (!mounted) return;
+    setState(() => _step = 2);
+    _samples = [];
+    _progressController.forward();
+    
+    // Run calibration for 3 seconds
+    Future.delayed(const Duration(milliseconds: 3000), () {
+      if (!mounted) return;
+      if (_samples.isEmpty) {
+        _resetToWaiting(); // No data, try again
+        return;
+      }
+      
+      double baseline = _samples.reduce((a, b) => a + b) / _samples.length;
+      
+      // Update Service singleton
+      _serialService.isCalibrated = true;
+      _serialService.baselineForce = baseline;
+      
+      widget.onCalibrationComplete(baseline);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: const Color(0xFF1E293B),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      child: Container(
+        padding: const EdgeInsets.all(24),
+        width: 320,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: (_step == 0 ? Colors.blueAccent : (_step == 1 ? Colors.amber : Colors.greenAccent)).withOpacity(0.1),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                _step == 0 ? Icons.accessibility_new : (_step == 1 ? Icons.timer : Icons.sensors),
+                size: 32,
+                color: _step == 0 ? Colors.blueAccent : (_step == 1 ? Colors.amber : Colors.greenAccent),
+              ),
+            ),
+            const SizedBox(height: 20),
+            if (_step == 0) ...[
+              const Text('Calibrate Sensor', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 12),
+              Text('Step on the mat with both feet to start.', textAlign: TextAlign.center, style: TextStyle(color: Colors.white70, fontSize: 16)),
+              const SizedBox(height: 8),
+              Text('Measurement will start automatically.', textAlign: TextAlign.center, style: TextStyle(color: Colors.white38, fontSize: 12)),
+              const SizedBox(height: 24),
+              TextButton(onPressed: widget.onSkip, child: Text('Skip', style: TextStyle(color: Colors.white24))),
+            ] else if (_step == 1) ...[
+              const Text('Get Ready', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 20),
+              Text('$_countdown', style: const TextStyle(color: Colors.amber, fontSize: 48, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 20),
+              Text('Keep standing...', style: TextStyle(color: Colors.white54, fontSize: 14)),
+            ] else ...[
+              const Text('Calibrating...', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 24),
+              AnimatedBuilder(
+                animation: _progressController,
+                builder: (context, child) => LinearProgressIndicator(
+                  value: _progressController.value,
+                  backgroundColor: Colors.white10,
+                  valueColor: const AlwaysStoppedAnimation<Color>(Colors.greenAccent),
+                ),
+              ),
+              const SizedBox(height: 20),
+              Text('Measuring baseline...', style: TextStyle(color: Colors.white54, fontSize: 14)),
+            ],
+          ],
+        ),
+      ),
     );
   }
 }

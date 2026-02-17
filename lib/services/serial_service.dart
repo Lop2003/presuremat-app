@@ -17,6 +17,16 @@ class SerialService {
   
   String? get connectedPort => _port?.name;
 
+  // Calibration State (Persistent Singleton)
+  bool isCalibrated = false;
+  double baselineForce = 0.0;
+  
+  void resetCalibration() {
+    isCalibrated = false;
+    baselineForce = 0.0;
+  }
+
+
 
   List<String> getAvailablePorts() {
     return SerialPort.availablePorts;
