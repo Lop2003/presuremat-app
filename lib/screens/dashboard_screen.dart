@@ -729,17 +729,23 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
                   children: [
                     // Left Column: Camera + Chart
                     Expanded(
-                      flex: 1,
-                      child: Column(
-                        children: [
-                          // Camera Preview
-                          Expanded(flex: 3, child: _buildCameraPreview()),
-                          const SizedBox(height: 12),
-                          // Chart
-                          Expanded(flex: 4, child: _buildChartCard()),
-                        ],
-                      ),
+                    flex: 1,
+                    child: Column(
+                      children: [
+                        // Camera Preview
+                        Expanded(flex: 3, child: _buildCameraPreview()),
+                        const SizedBox(height: 8),
+                        // Left % Chart
+                        Expanded(flex: 1, child: _buildLeftChartCard()),
+                        const SizedBox(height: 8),
+                        // Right % Chart
+                        Expanded(flex: 1, child: _buildRightChartCard()),
+                        const SizedBox(height: 8),
+                        // GRF Chart
+                        Expanded(flex: 1, child: _buildGRFChartCard()),
+                      ],
                     ),
+                  ),
                     const SizedBox(width: 16),
                     // Right Column: Balance + Heatmap + Record
                     Expanded(
@@ -1095,112 +1101,108 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
     ),
   );
 
-  Widget _buildChartCard() => Container(
-    padding: const EdgeInsets.all(16),
+  Widget _buildLeftChartCard() => Container(
+    padding: const EdgeInsets.all(10),
     decoration: BoxDecoration(
-      borderRadius: BorderRadius.circular(24),
+      borderRadius: BorderRadius.circular(16),
+      color: AppColors.surfaceDark,
+      border: Border.all(color: Colors.white.withOpacity(0.05)),
+    ),
+    child: Column(
+      children: [
+        Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(4),
+              decoration: BoxDecoration(color: Colors.cyanAccent.withOpacity(0.1), borderRadius: BorderRadius.circular(6)),
+              child: const Icon(Icons.arrow_back, color: Colors.cyanAccent, size: 14),
+            ),
+            const SizedBox(width: 6),
+            const Text('Left Foot %', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.cyanAccent)),
+          ],
+        ),
+        const SizedBox(height: 4),
+        Expanded(
+          child: LineChart(_buildSingleLineChartData(_leftDataPoints, Colors.cyanAccent), duration: const Duration(milliseconds: 0)),
+        ),
+      ],
+    ),
+  );
+
+  Widget _buildRightChartCard() => Container(
+    padding: const EdgeInsets.all(10),
+    decoration: BoxDecoration(
+      borderRadius: BorderRadius.circular(16),
+      color: AppColors.surfaceDark,
+      border: Border.all(color: Colors.white.withOpacity(0.05)),
+    ),
+    child: Column(
+      children: [
+        Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(4),
+              decoration: BoxDecoration(color: Colors.redAccent.withOpacity(0.1), borderRadius: BorderRadius.circular(6)),
+              child: const Icon(Icons.arrow_forward, color: Colors.redAccent, size: 14),
+            ),
+            const SizedBox(width: 6),
+            const Text('Right Foot %', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.redAccent)),
+          ],
+        ),
+        const SizedBox(height: 4),
+        Expanded(
+          child: LineChart(_buildSingleLineChartData(_rightDataPoints, Colors.redAccent), duration: const Duration(milliseconds: 0)),
+        ),
+      ],
+    ),
+  );
+
+  Widget _buildGRFChartCard() => Container(
+    padding: const EdgeInsets.all(12),
+    decoration: BoxDecoration(
+      borderRadius: BorderRadius.circular(20),
       color: AppColors.surfaceDark,
       boxShadow: [
         BoxShadow(
           color: Colors.black.withOpacity(0.3),
-          blurRadius: 20,
-          offset: const Offset(0, 10),
+          blurRadius: 15,
+          offset: const Offset(0, 6),
         ),
       ],
       border: Border.all(color: Colors.white.withOpacity(0.05)),
     ),
     child: Column(
       children: [
-        // Header with clear explanation
         Row(
           children: [
             Container(
-              padding: const EdgeInsets.all(8),
+              padding: const EdgeInsets.all(6),
               decoration: BoxDecoration(
-                color: Colors.cyanAccent.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(10),
+                color: Colors.blueAccent.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
               ),
-              child: const Icon(Icons.show_chart, color: Colors.cyanAccent, size: 20),
+              child: const Icon(Icons.fitness_center, color: Colors.blueAccent, size: 16),
             ),
-            const SizedBox(width: 12),
-            const Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Weight Distribution',
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.white,
-                  ),
-                ),
-                Text(
-                  '50% = Balanced | >50% = Left | <50% = Right',
-                  style: TextStyle(
-                    fontSize: 10,
-                    color: Colors.white54,
-                  ),
-                ),
-              ],
+            const SizedBox(width: 8),
+            const Text(
+              'Vertical Force (GRF)',
+              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.white),
+            ),
+            const Spacer(),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: Colors.blueAccent.withOpacity(0.15),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: const Text('Z-axis', style: TextStyle(color: Colors.blueAccent, fontSize: 10, fontWeight: FontWeight.bold)),
             ),
           ],
         ),
-        const SizedBox(height: 8),
-        // Legend
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: Colors.cyanAccent.withOpacity(0.2),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: const Row(
-                children: [
-                  Icon(Icons.arrow_upward, color: Colors.cyanAccent, size: 14),
-                  SizedBox(width: 4),
-                  Text('Left %', style: TextStyle(color: Colors.cyanAccent, fontSize: 11, fontWeight: FontWeight.bold)),
-                ],
-              ),
-            ),
-            const SizedBox(width: 8),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: Colors.redAccent.withOpacity(0.2),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: const Row(
-                children: [
-                  Icon(Icons.arrow_downward, color: Colors.redAccent, size: 14),
-                  SizedBox(width: 4),
-                  Text('Right %', style: TextStyle(color: Colors.redAccent, fontSize: 11, fontWeight: FontWeight.bold)),
-                ],
-              ),
-            ),
-            const SizedBox(width: 8),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: Colors.orangeAccent.withOpacity(0.2),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: const Row(
-                children: [
-                  Icon(Icons.fitness_center, color: Colors.orangeAccent, size: 14),
-                  SizedBox(width: 4),
-                  Text('Force', style: TextStyle(color: Colors.orangeAccent, fontSize: 11, fontWeight: FontWeight.bold)),
-                ],
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        // Chart
+        const SizedBox(height: 6),
         Expanded(
           child: LineChart(
-            _buildChartData(),
+            _buildGRFChartData(),
             duration: const Duration(milliseconds: 0),
           ),
         ),
@@ -1443,64 +1445,32 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
     );
   }
 
-  LineChartData _buildChartData() {
+  LineChartData _buildSingleLineChartData(List<FlSpot> dataPoints, Color lineColor) {
     return LineChartData(
-      clipData: const FlClipData.all(), // Clip chart content to prevent overflow
+      clipData: const FlClipData.all(),
       gridData: FlGridData(
         show: true,
         drawVerticalLine: false,
         horizontalInterval: 25,
         getDrawingHorizontalLine: (value) {
-          // Highlight 50% line (balanced)
-          if (value == 50) {
-            return FlLine(
-              color: Colors.greenAccent.withOpacity(0.6),
-              strokeWidth: 2,
-              dashArray: [8, 4],
-            );
-          }
-          return FlLine(
-            color: Colors.white.withOpacity(0.1),
-            strokeWidth: 1,
-          );
+          return FlLine(color: Colors.white.withOpacity(0.08), strokeWidth: 1);
         },
       ),
       titlesData: FlTitlesData(
-        rightTitles: const AxisTitles(
-          sideTitles: SideTitles(showTitles: false),
-        ),
+        rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
         topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-        bottomTitles: const AxisTitles(
-          sideTitles: SideTitles(showTitles: false),
-        ),
+        bottomTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
         leftTitles: AxisTitles(
           sideTitles: SideTitles(
             showTitles: true,
             interval: 50,
             getTitlesWidget: (value, meta) {
-              String label;
-              Color color;
-              if (value == 100) {
-                label = 'L 100%';
-                color = Colors.cyanAccent;
-              } else if (value == 50) {
-                label = '50%';
-                color = Colors.greenAccent;
-              } else if (value == 0) {
-                label = 'R 0%';
-                color = Colors.redAccent;
-              } else {
-                return const SizedBox.shrink();
-              }
-              return Padding(
-                padding: const EdgeInsets.only(right: 4),
-                child: Text(
-                  label,
-                  style: TextStyle(color: color, fontSize: 9, fontWeight: FontWeight.bold),
-                ),
-              );
+              if (value == 100) return Padding(padding: const EdgeInsets.only(right: 4), child: Text('100', style: TextStyle(color: lineColor.withOpacity(0.6), fontSize: 8, fontWeight: FontWeight.bold)));
+              if (value == 50) return Padding(padding: const EdgeInsets.only(right: 4), child: Text('50', style: TextStyle(color: lineColor.withOpacity(0.6), fontSize: 8, fontWeight: FontWeight.bold)));
+              if (value == 0) return Padding(padding: const EdgeInsets.only(right: 4), child: Text('0', style: TextStyle(color: lineColor.withOpacity(0.6), fontSize: 8, fontWeight: FontWeight.bold)));
+              return const SizedBox.shrink();
             },
-            reservedSize: 45,
+            reservedSize: 28,
           ),
         ),
       ),
@@ -1510,12 +1480,52 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
       minY: 0,
       maxY: 100,
       lineBarsData: [
-        // Left foot line (cyan)
-        _createLineChartBarData(_leftDataPoints, Colors.cyanAccent),
-        // Right foot line (red)
-        _createLineChartBarData(_rightDataPoints, Colors.redAccent),
-        // Total Force line (orange)
-        _createLineChartBarData(_totalForceDataPoints, Colors.orangeAccent),
+        _createLineChartBarData(dataPoints, lineColor),
+      ],
+      lineTouchData: LineTouchData(
+        touchTooltipData: LineTouchTooltipData(
+          getTooltipColor: (touchedSpot) => AppColors.surfaceLight.withOpacity(0.9),
+        ),
+      ),
+    );
+  }
+
+  LineChartData _buildGRFChartData() {
+    return LineChartData(
+      clipData: const FlClipData.all(),
+      gridData: FlGridData(
+        show: true,
+        drawVerticalLine: false,
+        horizontalInterval: 25,
+        getDrawingHorizontalLine: (value) {
+          return FlLine(color: Colors.white.withOpacity(0.1), strokeWidth: 1);
+        },
+      ),
+      titlesData: FlTitlesData(
+        rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+        topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+        bottomTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+        leftTitles: AxisTitles(
+          sideTitles: SideTitles(
+            showTitles: true,
+            interval: 50,
+            getTitlesWidget: (value, meta) {
+              if (value == 100) return const Padding(padding: EdgeInsets.only(right: 4), child: Text('Max', style: TextStyle(color: Colors.white54, fontSize: 9, fontWeight: FontWeight.bold)));
+              if (value == 50) return const Padding(padding: EdgeInsets.only(right: 4), child: Text('50%', style: TextStyle(color: Colors.white54, fontSize: 9, fontWeight: FontWeight.bold)));
+              if (value == 0) return const Padding(padding: EdgeInsets.only(right: 4), child: Text('0', style: TextStyle(color: Colors.white54, fontSize: 9, fontWeight: FontWeight.bold)));
+              return const SizedBox.shrink();
+            },
+            reservedSize: 35,
+          ),
+        ),
+      ),
+      borderData: FlBorderData(show: false),
+      minX: (_graphXValue - 2).clamp(0, double.infinity),
+      maxX: _graphXValue < 2 ? 2 : _graphXValue,
+      minY: 0,
+      maxY: 100,
+      lineBarsData: [
+        _createLineChartBarData(_totalForceDataPoints, Colors.blueAccent),
       ],
       lineTouchData: LineTouchData(
         touchTooltipData: LineTouchTooltipData(
