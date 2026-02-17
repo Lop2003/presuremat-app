@@ -586,37 +586,25 @@ class _PlaybackScreenState extends State<PlaybackScreen> {
 
   Widget _buildGRFChartBox(List<FlSpot> forceDataPoints) {
     return Container(
-      padding: const EdgeInsets.all(10),
+      padding: const EdgeInsets.all(8),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(12),
         color: const Color(0xFF1F2937),
-        boxShadow: [
-          BoxShadow(color: Colors.black.withOpacity(0.2), blurRadius: 8, offset: const Offset(0, 3)),
-        ],
       ),
       child: Column(
         children: [
           Row(
             children: [
               Container(
-                padding: const EdgeInsets.all(5),
-                decoration: BoxDecoration(
-                  color: Colors.blueAccent.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(6),
-                ),
-                child: const Icon(Icons.fitness_center, color: Colors.blueAccent, size: 14),
+                padding: const EdgeInsets.all(3),
+                decoration: BoxDecoration(color: Colors.blueAccent.withOpacity(0.1), borderRadius: BorderRadius.circular(4)),
+                child: const Icon(Icons.fitness_center, color: Colors.blueAccent, size: 12),
               ),
-              const SizedBox(width: 6),
-              const Text('Vertical Force (GRF)', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.white)),
-              const Spacer(),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-                decoration: BoxDecoration(color: Colors.blueAccent.withOpacity(0.15), borderRadius: BorderRadius.circular(4)),
-                child: const Text('Z-axis', style: TextStyle(color: Colors.blueAccent, fontSize: 9, fontWeight: FontWeight.bold)),
-              ),
+              const SizedBox(width: 4),
+              const Text('Vertical Force (GRF)', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: Colors.blueAccent)),
             ],
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: 3),
           Expanded(
             child: LineChart(
               _buildGRFPlaybackData(forceDataPoints, _playbackProportion),
@@ -1054,7 +1042,7 @@ class _PlaybackScreenState extends State<PlaybackScreen> {
         drawVerticalLine: false,
         horizontalInterval: 25,
         getDrawingHorizontalLine: (value) {
-          return FlLine(color: Colors.white.withOpacity(0.1), strokeWidth: 1);
+          return FlLine(color: Colors.white.withOpacity(0.08), strokeWidth: 1);
         },
       ),
       titlesData: FlTitlesData(
@@ -1063,22 +1051,15 @@ class _PlaybackScreenState extends State<PlaybackScreen> {
             showTitles: true,
             interval: 50,
             getTitlesWidget: (value, meta) {
-              if (value == 100) return const Padding(padding: EdgeInsets.only(right: 4), child: Text('Max', style: TextStyle(color: Colors.white54, fontSize: 8, fontWeight: FontWeight.bold)));
-              if (value == 50) return const Padding(padding: EdgeInsets.only(right: 4), child: Text('50%', style: TextStyle(color: Colors.white54, fontSize: 8, fontWeight: FontWeight.bold)));
-              if (value == 0) return const Padding(padding: EdgeInsets.only(right: 4), child: Text('0', style: TextStyle(color: Colors.white54, fontSize: 8, fontWeight: FontWeight.bold)));
+              if (value == 100) return Padding(padding: const EdgeInsets.only(right: 3), child: Text('100', style: TextStyle(color: Colors.blueAccent.withOpacity(0.6), fontSize: 7, fontWeight: FontWeight.bold)));
+              if (value == 50) return Padding(padding: const EdgeInsets.only(right: 3), child: Text('50', style: TextStyle(color: Colors.blueAccent.withOpacity(0.6), fontSize: 7, fontWeight: FontWeight.bold)));
+              if (value == 0) return Padding(padding: const EdgeInsets.only(right: 3), child: Text('0', style: TextStyle(color: Colors.blueAccent.withOpacity(0.6), fontSize: 7, fontWeight: FontWeight.bold)));
               return const SizedBox.shrink();
             },
-            reservedSize: 30,
+            reservedSize: 24,
           ),
         ),
-        bottomTitles: AxisTitles(
-          sideTitles: SideTitles(
-            showTitles: true,
-            interval: 1,
-            getTitlesWidget: (value, meta) => Text('${value.toInt()}s', style: const TextStyle(color: Colors.white54, fontSize: 9)),
-            reservedSize: 20,
-          ),
-        ),
+        bottomTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
         rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
         topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
       ),
@@ -1097,7 +1078,7 @@ class _PlaybackScreenState extends State<PlaybackScreen> {
       lineBarsData: [
         if (forceSpots.isNotEmpty)
           LineChartBarData(
-            spots: forceSpots, isCurved: true, color: Colors.blueAccent, barWidth: 3,
+            spots: forceSpots, isCurved: true, color: Colors.blueAccent, barWidth: 2,
             dotData: const FlDotData(show: false),
             belowBarData: BarAreaData(
               show: true,

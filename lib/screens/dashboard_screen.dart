@@ -1151,17 +1151,10 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
   );
 
   Widget _buildGRFChartCard() => Container(
-    padding: const EdgeInsets.all(12),
+    padding: const EdgeInsets.all(10),
     decoration: BoxDecoration(
-      borderRadius: BorderRadius.circular(20),
+      borderRadius: BorderRadius.circular(16),
       color: AppColors.surfaceDark,
-      boxShadow: [
-        BoxShadow(
-          color: Colors.black.withOpacity(0.3),
-          blurRadius: 15,
-          offset: const Offset(0, 6),
-        ),
-      ],
       border: Border.all(color: Colors.white.withOpacity(0.05)),
     ),
     child: Column(
@@ -1169,30 +1162,15 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
         Row(
           children: [
             Container(
-              padding: const EdgeInsets.all(6),
-              decoration: BoxDecoration(
-                color: Colors.blueAccent.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: const Icon(Icons.fitness_center, color: Colors.blueAccent, size: 16),
+              padding: const EdgeInsets.all(4),
+              decoration: BoxDecoration(color: Colors.blueAccent.withOpacity(0.1), borderRadius: BorderRadius.circular(6)),
+              child: const Icon(Icons.fitness_center, color: Colors.blueAccent, size: 14),
             ),
-            const SizedBox(width: 8),
-            const Text(
-              'Vertical Force (GRF)',
-              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.white),
-            ),
-            const Spacer(),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-              decoration: BoxDecoration(
-                color: Colors.blueAccent.withOpacity(0.15),
-                borderRadius: BorderRadius.circular(6),
-              ),
-              child: const Text('Z-axis', style: TextStyle(color: Colors.blueAccent, fontSize: 10, fontWeight: FontWeight.bold)),
-            ),
+            const SizedBox(width: 6),
+            const Text('Vertical Force (GRF)', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.blueAccent)),
           ],
         ),
-        const SizedBox(height: 6),
+        const SizedBox(height: 4),
         Expanded(
           child: LineChart(
             _buildGRFChartData(),
@@ -1503,12 +1481,12 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
             showTitles: true,
             interval: 50,
             getTitlesWidget: (value, meta) {
-              if (value == 100) return const Padding(padding: EdgeInsets.only(right: 4), child: Text('Max', style: TextStyle(color: Colors.white54, fontSize: 9, fontWeight: FontWeight.bold)));
-              if (value == 50) return const Padding(padding: EdgeInsets.only(right: 4), child: Text('50%', style: TextStyle(color: Colors.white54, fontSize: 9, fontWeight: FontWeight.bold)));
-              if (value == 0) return const Padding(padding: EdgeInsets.only(right: 4), child: Text('0', style: TextStyle(color: Colors.white54, fontSize: 9, fontWeight: FontWeight.bold)));
+              if (value == 100) return Padding(padding: const EdgeInsets.only(right: 4), child: Text('100', style: TextStyle(color: Colors.blueAccent.withOpacity(0.6), fontSize: 8, fontWeight: FontWeight.bold)));
+              if (value == 50) return Padding(padding: const EdgeInsets.only(right: 4), child: Text('50', style: TextStyle(color: Colors.blueAccent.withOpacity(0.6), fontSize: 8, fontWeight: FontWeight.bold)));
+              if (value == 0) return Padding(padding: const EdgeInsets.only(right: 4), child: Text('0', style: TextStyle(color: Colors.blueAccent.withOpacity(0.6), fontSize: 8, fontWeight: FontWeight.bold)));
               return const SizedBox.shrink();
             },
-            reservedSize: 35,
+            reservedSize: 28,
           ),
         ),
       ),
