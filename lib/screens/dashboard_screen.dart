@@ -52,6 +52,8 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
   CameraController? _cameraController;
   Future<void>? _initializeControllerFuture;
   bool _isRecording = false;
+  List<CameraDescription> _availableCamerasList = [];
+  int _selectedCameraIndex = 0;
 
   final SupabaseClient _supabase = Supabase.instance.client;
 
@@ -134,17 +136,37 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
   Future<void> _initializeCamera() async {
     try {
       final cameras = await availableCameras();
+      // Log all available cameras for debugging
+      for (int i = 0; i < cameras.length; i++) {
+        debugPrint('Camera $i: ${cameras[i].name} (${cameras[i].lensDirection})');
+      }
       if (cameras.isNotEmpty) {
-        _cameraController = CameraController(
-          cameras.first,
-          ResolutionPreset.medium,
-        );
-        _initializeControllerFuture = _cameraController!.initialize();
-        if (mounted) setState(() {});
+        _availableCamerasList = cameras;
+        // Default to last camera (often USB webcam)
+        _selectedCameraIndex = cameras.length - 1;
+        await _startCamera(_selectedCameraIndex);
       }
     } catch (e) {
       debugPrint('Error initializing camera: $e');
     }
+  }
+
+  Future<void> _startCamera(int index) async {
+    // Dispose old controller
+    await _cameraController?.dispose();
+    _cameraController = null;
+    _initializeControllerFuture = null;
+    if (mounted) setState(() {});
+
+    final selectedCamera = _availableCamerasList[index];
+    debugPrint('Starting camera: ${selectedCamera.name}');
+    _cameraController = CameraController(
+      selectedCamera,
+      ResolutionPreset.high,
+    );
+    _initializeControllerFuture = _cameraController!.initialize();
+    _selectedCameraIndex = index;
+    if (mounted) setState(() {});
   }
 
   void _initializeHeatmapData() {
@@ -1132,19 +1154,47 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
             ),
           ),
 
-          // Camera Controls (Mock)
-          Positioned(
-            bottom: 16,
-            right: 16,
-            child: Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: Colors.black54,
-                shape: BoxShape.circle,
+          // Camera Selector Dropdown
+          if (_availableCamerasList.length > 1)
+            Positioned(
+              top: 16,
+              right: 16,
+              child: Container(
+                constraints: const BoxConstraints(maxWidth: 200),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.black87,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: DropdownButton<int>(
+                  value: _selectedCameraIndex,
+                  dropdownColor: Colors.grey[900],
+                  underline: const SizedBox(),
+                  isExpanded: true,
+                  icon: const Icon(Icons.switch_camera, color: Colors.white, size: 18),
+                  style: const TextStyle(color: Colors.white, fontSize: 12),
+                  items: List.generate(_availableCamerasList.length, (i) {
+                    // Extract clean camera name (remove device path)
+                    String rawName = _availableCamerasList[i].name;
+                    String cleanName = rawName.split('<').first.trim();
+                    if (cleanName.isEmpty) cleanName = 'Camera $i';
+                    return DropdownMenuItem<int>(
+                      value: i,
+                      child: Text(
+                        cleanName,
+                        style: const TextStyle(color: Colors.white, fontSize: 12),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    );
+                  }),
+                  onChanged: (int? newIndex) {
+                    if (newIndex != null && newIndex != _selectedCameraIndex) {
+                      _startCamera(newIndex);
+                    }
+                  },
+                ),
               ),
-              child: const Icon(Icons.switch_camera, color: Colors.white),
             ),
-          ),
         ],
       ),
     );
