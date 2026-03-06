@@ -123,7 +123,7 @@ class _SmoothHeatmapPainter extends CustomPainter {
     for (int ry = 0; ry < renderRows; ry++) {
       for (int rx = 0; rx < renderCols; rx++) {
         final dataX = (rx / (renderCols - 1)) * (cols - 1);
-        final dataY = ((renderRows - 1 - ry) / (renderRows - 1)) * (rows - 1);
+        final dataY = (ry / (renderRows - 1)) * (rows - 1);
         final pressure = _bilinearInterpolate(dataY, dataX, rows, cols);
         paint.color = _getHeatColor(pressure);
         canvas.drawRect(
