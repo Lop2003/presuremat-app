@@ -151,7 +151,7 @@ class _PlaybackScreenState extends State<PlaybackScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 _buildHeader(timestamp, dataPoints.length),
-                const SizedBox(height: 16),
+                const SizedBox(height: 10),
                 Expanded(
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -162,8 +162,8 @@ class _PlaybackScreenState extends State<PlaybackScreen> {
                         child: Column(
                           children: [
                             if (_hasVideo) ...[
-                              Expanded(child: _buildVideoSection()),
-                              const SizedBox(height: 16),
+                              Expanded(flex: 3, child: _buildVideoSection()),
+                              const SizedBox(height: 8),
                             ],
                             // Charts - 3 separate boxes
                             _hasVideo 
@@ -423,35 +423,34 @@ class _PlaybackScreenState extends State<PlaybackScreen> {
 
   Widget _buildHeader(DateTime timestamp, int dataPointCount) {
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
       decoration: BoxDecoration(
         color: const Color(0xFF1F2937),
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(10),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Row(
         children: [
           Text(
-            DateFormat('EEEE, MMM d, yyyy - hh:mm a').format(timestamp),
+            DateFormat('EEE, MMM d, yyyy - hh:mm a').format(timestamp),
             style: const TextStyle(
-              fontSize: 18,
+              fontSize: 14,
               fontWeight: FontWeight.bold,
               color: Colors.white,
             ),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(width: 16),
           Text(
-            '$dataPointCount data points recorded',
-            style: const TextStyle(
-              fontSize: 14,
-              color: Colors.white70,
+            '$dataPointCount pts',
+            style: TextStyle(
+              fontSize: 12,
+              color: Colors.white.withOpacity(0.5),
             ),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(width: 16),
           Text(
-            'Swing Phase: $_currentSwingPhase',
+            _currentSwingPhase,
             style: const TextStyle(
-              fontSize: 14,
+              fontSize: 12,
               color: Colors.orange,
               fontWeight: FontWeight.w500,
             ),

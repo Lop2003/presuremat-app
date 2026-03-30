@@ -26,7 +26,7 @@ class GolfForcePlateApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Golf Force Plate',
+      title: 'Pressure Mat System',
       theme: appTheme,
       home: const SplashScreen(),
       debugShowCheckedModeBanner: false,

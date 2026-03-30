@@ -707,6 +707,21 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
     // Swapped: Left Foot uses sensors 32-56, Right Foot uses sensors 0-24
     final leftGrid5x5 = _mapTo5x5Grid(sensors, 32);
     final rightGrid5x5 = _mapTo5x5Grid(sensors, 0);
+    
+    // Flip all rows of right foot horizontally (mirror left-right)
+    for (int i = 0; i < rightGrid5x5.length; i++) {
+      rightGrid5x5[i] = rightGrid5x5[i].reversed.toList();
+    }
+    
+    // Flip the top row (index 0) of right foot horizontally
+    if (rightGrid5x5.isNotEmpty) {
+      rightGrid5x5[0] = rightGrid5x5[0].reversed.toList();
+    }
+    
+    // Flip the bottom row (index 4) of left foot horizontally
+    if (leftGrid5x5.isNotEmpty && leftGrid5x5.length > 4) {
+      leftGrid5x5[4] = leftGrid5x5[4].reversed.toList();
+    }
 
     // Calculate total force for each foot
     double leftTotal = 0;
@@ -749,30 +764,30 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
 
     _updateDataFromSerial(leftPercent, rightPercent, leftGridDisplay, rightGridDisplay, totalSystemForce);
     
-    // Auto-recording logic
-    if (_autoRecordEnabled && _isSerialConnected) {
-      final bool forceAboveThreshold = totalSystemForce > _forceThreshold;
-      
-      if (forceAboveThreshold) {
-        // Person is standing on mat
-        _lowForceCounter = 0; // Reset counter
-        
-        if (!_isRecording && !_isSwinging) {
-          // Auto-start recording
-          _startAutoRecording();
-        }
-      } else {
-        // Force below threshold
-        if (_isRecording) {
-          _lowForceCounter++;
-          
-          if (_lowForceCounter >= _stopDelay) {
-            // Auto-stop recording after delay
-            _stopAutoRecording();
-          }
-        }
-      }
-    }
+    // Auto-recording logic (disabled)
+    // if (_autoRecordEnabled && _isSerialConnected) {
+    //   final bool forceAboveThreshold = totalSystemForce > _forceThreshold;
+    //   
+    //   if (forceAboveThreshold) {
+    //     // Person is standing on mat
+    //     _lowForceCounter = 0; // Reset counter
+    //     
+    //     if (!_isRecording && !_isSwinging) {
+    //       // Auto-start recording
+    //       _startAutoRecording();
+    //     }
+    //   } else {
+    //     // Force below threshold
+    //     if (_isRecording) {
+    //       _lowForceCounter++;
+    //       
+    //       if (_lowForceCounter >= _stopDelay) {
+    //         // Auto-stop recording after delay
+    //         _stopAutoRecording();
+    //       }
+    //     }
+    //   }
+    // }
     
     // If recording, buffer the data
     if (_isRecording) {

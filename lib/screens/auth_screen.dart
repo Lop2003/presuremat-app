@@ -323,7 +323,7 @@ class _AuthScreenState extends State<AuthScreen>
                     ),
                     const SizedBox(height: 32),
                     Text(
-                      'Golf Force Plate',
+                      'Pressure Mat System',
                       style: Theme.of(context).textTheme.headlineMedium?.copyWith(
                             color: Colors.white,
                             fontWeight: FontWeight.bold,
@@ -502,6 +502,7 @@ class _AuthScreenState extends State<AuthScreen>
                               ),
                               const SizedBox(height: 24),
 
+                              /*
                               Row(
                                 children: [
                                   Expanded(
@@ -597,6 +598,7 @@ class _AuthScreenState extends State<AuthScreen>
                                   ),
                                 ),
                               const SizedBox(height: 24),
+                              */
 
                               SizedBox(
                                 height: 56,
@@ -638,7 +640,7 @@ class _AuthScreenState extends State<AuthScreen>
 
                     Text(
                       _isLogin
-                          ? 'New to Golf Force Plate?'
+                          ? 'New to Pressure Mat System?'
                           : 'Already have an account?',
                       style: TextStyle(
                         color: Colors.white.withOpacity(0.6),
