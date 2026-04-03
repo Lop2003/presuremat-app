@@ -145,6 +145,7 @@ class _SensorDisplayScreenState extends State<SensorDisplayScreen>
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
+        automaticallyImplyLeading: false,
         title: const Text(
           'Sensor Connection',
           style: TextStyle(
@@ -154,17 +155,6 @@ class _SensorDisplayScreenState extends State<SensorDisplayScreen>
           ),
         ),
         centerTitle: true,
-        leading: IconButton(
-          icon: Container(
-            padding: const EdgeInsets.all(6),
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.08),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: const Icon(Icons.arrow_back_ios_new, color: Colors.white, size: 18),
-          ),
-          onPressed: () => Navigator.pop(context),
-        ),
         actions: [
           IconButton(
             icon: Container(

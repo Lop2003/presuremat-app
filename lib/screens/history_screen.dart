@@ -91,19 +91,9 @@ class _HistoryScreenState extends State<HistoryScreen> {
         backgroundColor: Colors.transparent,
         elevation: 0,
         centerTitle: true,
+        automaticallyImplyLeading: false,
         title: const Text('Swing History',
             style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 20)),
-        leading: IconButton(
-          icon: Container(
-            padding: const EdgeInsets.all(6),
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.08),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: const Icon(Icons.arrow_back_ios_new, color: Colors.white, size: 18),
-          ),
-          onPressed: () => Navigator.pop(context),
-        ),
       ),
       body: StreamBuilder<List<Map<String, dynamic>>>(
         stream: _swingsStream,
@@ -180,19 +170,10 @@ class _HistoryScreenState extends State<HistoryScreen> {
                         textAlign: TextAlign.center,
                         style: TextStyle(color: Colors.white.withOpacity(0.4), fontSize: 13, height: 1.5)),
                     const SizedBox(height: 24),
-                    SizedBox(
+                    const SizedBox(
                       height: 44,
-                      child: ElevatedButton.icon(
-                        onPressed: () => Navigator.pop(context),
-                        icon: const Icon(Icons.dashboard, size: 18),
-                        label: const Text('Go to Dashboard'),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.cyanAccent.withOpacity(0.15),
-                          foregroundColor: Colors.cyanAccent,
-                          elevation: 0,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                        ),
-                      ),
+                      child: Text('Record a swing from the Dashboard tab below.',
+                          style: TextStyle(color: Colors.cyanAccent, fontSize: 13)),
                     ),
                   ],
                 ),

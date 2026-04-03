@@ -56,8 +56,29 @@ class _AuthScreenState extends State<AuthScreen>
 
       try {
         if (_isLogin) {
+          String loginEmail = _userEmail.trim();
+          
+          // If input doesn't contain '@', treat as username and look up email
+          if (!loginEmail.contains('@')) {
+            try {
+              final result = await _supabase
+                  .from('profiles')
+                  .select('email')
+                  .eq('username', loginEmail)
+                  .maybeSingle();
+              
+              if (result == null || result['email'] == null) {
+                throw AuthException('Username not found.');
+              }
+              loginEmail = result['email'] as String;
+            } catch (e) {
+              if (e is AuthException) rethrow;
+              throw AuthException('Could not find account with that username.');
+            }
+          }
+          
           await _supabase.auth.signInWithPassword(
-            email: _userEmail,
+            email: loginEmail,
             password: _userPassword,
           );
         } else {
@@ -74,7 +95,7 @@ class _AuthScreenState extends State<AuthScreen>
                 await _supabase.from('profiles').upsert({
                 'id': user.id,
                 'username': _userName,
-                'email': _userEmail, // Though email is in auth.users, sometimes useful in profiles
+                'email': _userEmail,
                 'updated_at': DateTime.now().toIso8601String(),
               });
               } catch (e) {
@@ -128,6 +149,107 @@ class _AuthScreenState extends State<AuthScreen>
         }
       }
     }
+  }
+
+  void _showForgotPasswordDialog() {
+    final emailController = TextEditingController();
+    
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surfaceDark,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Reset Password',
+            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Enter your email address and we\'ll send you a link to reset your password.',
+                style: TextStyle(color: Colors.white.withOpacity(0.6), fontSize: 14)),
+            const SizedBox(height: 16),
+            TextField(
+              controller: emailController,
+              style: const TextStyle(color: Colors.white),
+              decoration: InputDecoration(
+                labelText: 'Email Address',
+                labelStyle: TextStyle(color: Colors.white.withOpacity(0.6)),
+                prefixIcon: Icon(Icons.email_outlined, color: Colors.white.withOpacity(0.6)),
+                filled: true,
+                fillColor: AppColors.backgroundDark.withOpacity(0.5),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide.none,
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(color: Colors.white.withOpacity(0.1)),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(color: AppColors.primary, width: 2),
+                ),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text('Cancel', style: TextStyle(color: Colors.white.withOpacity(0.5))),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              final email = emailController.text.trim();
+              if (email.isEmpty || !email.contains('@')) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Please enter a valid email.'),
+                    backgroundColor: AppColors.error,
+                    behavior: SnackBarBehavior.floating,
+                  ),
+                );
+                return;
+              }
+              
+              Navigator.pop(ctx);
+              
+              try {
+                await _supabase.auth.resetPasswordForEmail(
+                  email,
+                  redirectTo: 'https://lop2003.github.io/presuremat-app/web/reset-password.html',
+                );
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Password reset email sent! Check your inbox.'),
+                      backgroundColor: AppColors.primary,
+                      behavior: SnackBarBehavior.floating,
+                    ),
+                  );
+                }
+              } catch (e) {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Error: $e'),
+                      backgroundColor: AppColors.error,
+                      behavior: SnackBarBehavior.floating,
+                    ),
+                  );
+                }
+              }
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.primary,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+            child: const Text('Send Reset Link'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _signInWithGoogle() async {
@@ -473,11 +595,14 @@ class _AuthScreenState extends State<AuthScreen>
 
                               _buildTextField(
                                 key: 'email',
-                                label: 'Email Address',
-                                icon: Icons.email_outlined,
-                                keyboardType: TextInputType.emailAddress,
+                                label: _isLogin ? 'Email or Username' : 'Email Address',
+                                icon: _isLogin ? Icons.person_outline : Icons.email_outlined,
+                                keyboardType: _isLogin ? TextInputType.text : TextInputType.emailAddress,
                                 validator: (value) {
-                                  if (value!.isEmpty || !value.contains('@')) {
+                                  if (value!.isEmpty) {
+                                    return _isLogin ? 'Please enter email or username.' : 'Invalid email.';
+                                  }
+                                  if (!_isLogin && !value.contains('@')) {
                                     return 'Invalid email.';
                                   }
                                   return null;
@@ -499,7 +624,30 @@ class _AuthScreenState extends State<AuthScreen>
                                 },
                                 onSaved: (value) => _userPassword = value!,
                               ),
-                              const SizedBox(height: 24),
+                              const SizedBox(height: 8),
+
+                              // Forgot Password link (only in login mode)
+                              if (_isLogin)
+                                Align(
+                                  alignment: Alignment.centerRight,
+                                  child: TextButton(
+                                    onPressed: _showForgotPasswordDialog,
+                                    style: TextButton.styleFrom(
+                                      padding: EdgeInsets.zero,
+                                      minimumSize: const Size(0, 30),
+                                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                    ),
+                                    child: Text(
+                                      'Forgot Password?',
+                                      style: TextStyle(
+                                        color: AppColors.primary.withOpacity(0.8),
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              const SizedBox(height: 16),
 
                               /*
                               Row(

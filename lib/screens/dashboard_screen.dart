@@ -549,6 +549,18 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
 
     // Simulation Path
 
+    // Start video recording for simulation too
+    if (_cameraController != null && 
+        _cameraController!.value.isInitialized && 
+        !_cameraController!.value.isRecordingVideo) {
+      try {
+        await _cameraController!.startVideoRecording();
+        _isRecording = true;
+      } catch (e) {
+        debugPrint('Error starting video recording (simulation): $e');
+      }
+    }
+
     final List<FlSpot> currentSwingL = [];
     final List<FlSpot> currentSwingR = [];
     double swingTime = 0.0;
