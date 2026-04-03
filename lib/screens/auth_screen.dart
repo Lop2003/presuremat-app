@@ -184,7 +184,6 @@ class _AuthScreenState extends State<AuthScreen>
                 'id': user.id,
                 'username': googleUser.displayName ?? 'Google User',
                 'email': googleUser.email,
-                'avatar_url': googleUser.photoUrl,
                 'updated_at': DateTime.now().toIso8601String(),
               });
               } catch (e) {

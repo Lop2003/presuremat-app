@@ -14,19 +14,10 @@ class _UserProfileModalState extends State<UserProfileModal> {
   final _usernameController = TextEditingController();
   final _emailController = TextEditingController();
   final _phoneController = TextEditingController();
-  final _handicapController = TextEditingController();
   
-  String? _selectedExperienceLevel;
   bool _isLoading = false;
   bool _isSaving = false;
   final SupabaseClient _supabase = Supabase.instance.client;
-  
-  final List<String> _experienceLevels = [
-    'Beginner',
-    'Intermediate',
-    'Advanced',
-    'Professional',
-  ];
 
   @override
   void initState() {
@@ -53,8 +44,6 @@ class _UserProfileModalState extends State<UserProfileModal> {
       _usernameController.text = data['username'] ?? '';
       _emailController.text = user.email ?? '';
       _phoneController.text = data['phone'] ?? '';
-      _handicapController.text = data['handicap']?.toString() ?? '';
-      _selectedExperienceLevel = data['experience_level']; // Note: snake_case in DB
     } catch (e) {
       print('Error loading profile: $e');
       // If profile doesn't exist yet, just show email
@@ -83,14 +72,8 @@ class _UserProfileModalState extends State<UserProfileModal> {
         'username': _usernameController.text.trim(),
         'email': user.email,
         'phone': _phoneController.text.trim(),
-        'experience_level': _selectedExperienceLevel,
         'updated_at': DateTime.now().toIso8601String(),
       };
-
-      // Only add handicap if it's not empty
-      if (_handicapController.text.trim().isNotEmpty) {
-        updates['handicap'] = double.tryParse(_handicapController.text.trim()) ?? 0.0;
-      }
 
       await _supabase.from('profiles').upsert(updates);
 
@@ -126,7 +109,6 @@ class _UserProfileModalState extends State<UserProfileModal> {
     _usernameController.dispose();
     _emailController.dispose();
     _phoneController.dispose();
-    _handicapController.dispose();
     super.dispose();
   }
 
@@ -193,16 +175,6 @@ class _UserProfileModalState extends State<UserProfileModal> {
                               icon: Icons.phone_outlined,
                               keyboardType: TextInputType.phone,
                             ),
-                            const SizedBox(height: 16),
-                            _buildTextField(
-                              controller: _handicapController,
-                              label: 'Handicap (Optional)',
-                              icon: Icons.golf_course,
-                              keyboardType: TextInputType.number,
-                              hint: 'e.g., 12.5',
-                            ),
-                            const SizedBox(height: 16),
-                            _buildDropdown(),
                             const SizedBox(height: 24),
                             _buildActionButtons(),
                           ],

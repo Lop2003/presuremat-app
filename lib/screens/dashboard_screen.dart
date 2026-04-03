@@ -68,7 +68,7 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
   List<Map<String, dynamic>> _recordedDataBuffer = [];
   
   // Auto-recording based on pressure detection
-  bool _autoRecordEnabled = true;       // Auto-record mode enabled
+  bool _autoRecordEnabled = false;      // Auto-record mode starts DISABLED
   int _lowForceCounter = 0;             // Count frames below threshold
   static const int _stopDelay = 15;     // Frames to wait before auto-stop (~1.5 sec at 100ms)
 
@@ -109,7 +109,10 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
       barrierDismissible: false,
       barrierColor: Colors.black87,
       builder: (ctx) => _CalibrationDialog(
-        onSkip: () => Navigator.of(ctx).pop(),
+        onSkip: () {
+          Navigator.of(ctx).pop();
+          _showRecordModeSelectionDialog();
+        },
         onCalibrationComplete: (baseline) {
           Navigator.of(ctx).pop();
           // Force UI update
@@ -128,7 +131,123 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
             ),
           );
+          _showRecordModeSelectionDialog();
         },
+      ),
+    );
+  }
+
+  void _showRecordModeSelectionDialog() {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      barrierColor: Colors.black87,
+      builder: (ctx) => Dialog(
+        backgroundColor: AppColors.surfaceDark,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        child: Container(
+          padding: const EdgeInsets.all(24),
+          constraints: const BoxConstraints(maxWidth: 400),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.video_camera_back, size: 48, color: AppColors.primary),
+              const SizedBox(height: 16),
+              const Text(
+                'Select Recording Mode',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'How would you like to record your swings?',
+                style: TextStyle(fontSize: 14, color: Colors.white.withOpacity(0.7)),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 24),
+              
+              // Auto Mode
+              InkWell(
+                onTap: () {
+                  setState(() => _autoRecordEnabled = true);
+                  Navigator.of(ctx).pop();
+                },
+                borderRadius: BorderRadius.circular(16),
+                child: Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: AppColors.surfaceLight,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: AppColors.primary, width: 2),
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: AppColors.primary.withOpacity(0.2),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(Icons.auto_awesome, color: AppColors.primary, size: 24),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text('Auto Record', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
+                            const SizedBox(height: 4),
+                            Text('Starts automatically when stepping on mat', style: TextStyle(fontSize: 12, color: Colors.white.withOpacity(0.7))),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              
+              // Manual Mode
+              InkWell(
+                onTap: () {
+                  setState(() => _autoRecordEnabled = false);
+                  Navigator.of(ctx).pop();
+                },
+                borderRadius: BorderRadius.circular(16),
+                child: Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: AppColors.surfaceLight,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: Colors.transparent, width: 2),
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.1),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(Icons.touch_app, color: Colors.white70, size: 24),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text('Manual Record', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
+                            const SizedBox(height: 4),
+                            Text('Tap button to start and stop recordings', style: TextStyle(fontSize: 12, color: Colors.white.withOpacity(0.7))),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -360,7 +479,6 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
         'timestamp': DateTime.now().toIso8601String(),
         'data_points': dataPointsToSave,
         'heatmap_data': heatmapData,
-        'swing_phase': _swingPhase,
         'video_path': publicVideoUrl,
       };
 
@@ -373,66 +491,64 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
   }
 
   Future<void> _handleRecordButtonPress() async {
-    if (_isSwinging) return;
+    if (_isSerialConnected) {
+      if (_isSwinging) {
+        // Stop Real Recording
+        _isRecording = false;
+        _isSwinging = false;
+        setState(() => _swingPhase = "Saving...");
 
-    // Start Video Recording
-    if (_cameraController != null && 
-        _cameraController!.value.isInitialized && 
-        !_cameraController!.value.isRecordingVideo) {
-      try {
-        await _cameraController!.startVideoRecording();
-        _isRecording = true;
-      } catch (e) {
-        debugPrint('Error starting video recording: $e');
+        String? recordedPath;
+        if (_cameraController != null && _cameraController!.value.isRecordingVideo) {
+          try {
+            final file = await _cameraController!.stopVideoRecording();
+            recordedPath = file.path;
+          } catch (e) {
+            debugPrint('Error stopping video recording: $e');
+          }
+        }
+
+        // Use buffered data
+        await _saveSwingSession([], [], videoPath: recordedPath, recordedData: List.from(_recordedDataBuffer));
+        
+        // Reset graph but keep serial streaming
+        if (mounted) {
+          setState(() {
+            _swingPhase = "Ready";
+            _leftDataPoints = [];
+            _rightDataPoints = [];
+            _totalForceDataPoints = [];
+            _graphXValue = 0;
+          });
+        }
+        return;
+      } else {
+        // Start Real Recording
+        if (_cameraController != null && 
+            _cameraController!.value.isInitialized && 
+            !_cameraController!.value.isRecordingVideo) {
+          try {
+            await _cameraController!.startVideoRecording();
+            _isRecording = true;
+          } catch (e) {
+            debugPrint('Error starting video recording: $e');
+          }
+        }
+
+        setState(() {
+          _leftDataPoints = [];
+          _rightDataPoints = [];
+          _recordedDataBuffer = [];
+          _graphXValue = 0;
+          _isSwinging = true;
+          _swingPhase = "Recording...";
+        });
+        return;
       }
     }
 
-    setState(() {
-      _leftDataPoints = [];
-      _rightDataPoints = [];
-      _recordedDataBuffer = [];
-      _graphXValue = 0;
-      _isSwinging = true;
-      _swingPhase = _isSerialConnected ? "Recording..." : "Backswing";
-    });
-
-    if (_isSerialConnected) {
-       // Real Recording Path
-       Future.delayed(const Duration(seconds: 4), () async {
-          if (!mounted) return;
-          
-          _isRecording = false;
-          _isSwinging = false;
-          setState(() => _swingPhase = "Saving...");
-
-          String? recordedPath;
-          if (_cameraController != null && _cameraController!.value.isRecordingVideo) {
-            try {
-              final file = await _cameraController!.stopVideoRecording();
-              recordedPath = file.path;
-            } catch (e) {
-              debugPrint('Error stopping video recording: $e');
-            }
-          }
-
-          // Use buffered data
-          await _saveSwingSession([], [], videoPath: recordedPath, recordedData: List.from(_recordedDataBuffer));
-          
-          // Reset graph but keep serial streaming (don't call _returnToBaseline)
-          if (mounted) {
-            setState(() {
-              _swingPhase = "Ready";
-              _leftDataPoints = [];
-              _rightDataPoints = [];
-              _totalForceDataPoints = [];
-              _graphXValue = 0;
-            });
-          }
-       });
-       return;
-    }
-
     // Simulation Path
+
     final List<FlSpot> currentSwingL = [];
     final List<FlSpot> currentSwingR = [];
     double swingTime = 0.0;
@@ -764,30 +880,30 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
 
     _updateDataFromSerial(leftPercent, rightPercent, leftGridDisplay, rightGridDisplay, totalSystemForce);
     
-    // Auto-recording logic (disabled)
-    // if (_autoRecordEnabled && _isSerialConnected) {
-    //   final bool forceAboveThreshold = totalSystemForce > _forceThreshold;
-    //   
-    //   if (forceAboveThreshold) {
-    //     // Person is standing on mat
-    //     _lowForceCounter = 0; // Reset counter
-    //     
-    //     if (!_isRecording && !_isSwinging) {
-    //       // Auto-start recording
-    //       _startAutoRecording();
-    //     }
-    //   } else {
-    //     // Force below threshold
-    //     if (_isRecording) {
-    //       _lowForceCounter++;
-    //       
-    //       if (_lowForceCounter >= _stopDelay) {
-    //         // Auto-stop recording after delay
-    //         _stopAutoRecording();
-    //       }
-    //     }
-    //   }
-    // }
+    // Auto-recording logic
+    if (_autoRecordEnabled && _isSerialConnected) {
+      final bool forceAboveThreshold = totalSystemForce > _forceThreshold;
+      
+      if (forceAboveThreshold) {
+        // Person is standing on mat
+        _lowForceCounter = 0; // Reset counter
+        
+        if (!_isRecording && !_isSwinging) {
+          // Auto-start recording
+          _startAutoRecording();
+        }
+      } else {
+        // Force below threshold
+        if (_isRecording) {
+          _lowForceCounter++;
+          
+          if (_lowForceCounter >= _stopDelay) {
+            // Auto-stop recording after delay
+            _stopAutoRecording();
+          }
+        }
+      }
+    }
     
     // If recording, buffer the data
     if (_isRecording) {
@@ -940,6 +1056,30 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
                           if (_showHeatmap)
                             Expanded(child: _buildHeatmapSection()),
                           const SizedBox(height: 12),
+                          // Auto Record Toggle
+                          if (_isSerialConnected)
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 8.0, right: 8.0),
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.end,
+                                children: [
+                                  const Text(
+                                    'Auto Record',
+                                    style: TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.bold),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Switch(
+                                    value: _autoRecordEnabled,
+                                    activeColor: AppColors.primary,
+                                    onChanged: (val) {
+                                      setState(() {
+                                        _autoRecordEnabled = val;
+                                      });
+                                    },
+                                  ),
+                                ],
+                              ),
+                            ),
                           // Record Button (compact)
                           SizedBox(height: 50, child: _buildRecordButton()),
                         ],
@@ -1638,17 +1778,21 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
         width: double.infinity,
         height: 64,
         child: ElevatedButton.icon(
-          onPressed: _isSwinging ? null : _handleRecordButtonPress,
+          onPressed: (_isSerialConnected || !_isSwinging) ? _handleRecordButtonPress : null,
           icon: AnimatedSwitcher(
             duration: const Duration(milliseconds: 300),
             child: Icon(
-              _isSwinging ? Icons.hourglass_top : Icons.play_circle_fill,
+              _isSerialConnected 
+                  ? (_isSwinging ? Icons.stop_circle : Icons.play_circle_fill)
+                  : (_isSwinging ? Icons.hourglass_top : Icons.play_circle_fill),
               size: 28,
               key: ValueKey(_isSwinging),
             ),
           ),
           label: Text(
-            _isSwinging ? 'DEMO SWING...' : 'DEMO SWING',
+            _isSwinging 
+                ? (_isSerialConnected ? 'STOP RECORD' : 'STOP RECORD') 
+                : (_isSerialConnected ? 'START RECORD' : 'START RECORD'),
             style: const TextStyle(
               fontSize: 16,
               fontWeight: FontWeight.w800,
@@ -1656,7 +1800,7 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
             ),
           ),
           style: ElevatedButton.styleFrom(
-            backgroundColor: _isSwinging ? AppColors.surfaceLight : AppColors.primary,
+            backgroundColor: _isSerialConnected && _isSwinging ? Colors.red.shade800 : (_isSwinging ? AppColors.surfaceLight : AppColors.primary),
             foregroundColor: Colors.white,
             elevation: 0,
             shape: RoundedRectangleBorder(

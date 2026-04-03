@@ -136,7 +136,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Widget _buildProfileHeader() {
-    final avatarUrl = _userData?['avatar_url'] ?? _currentUser?.userMetadata?['avatar_url'];
     final username = _userData?['username'] ?? _currentUser?.userMetadata?['name'] ?? 'Golf Player';
 
     return Container(
@@ -176,16 +175,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
             child: CircleAvatar(
               radius: 60,
               backgroundColor: Colors.grey[800],
-              backgroundImage: avatarUrl != null
-                  ? NetworkImage(avatarUrl)
-                  : null,
-              child: avatarUrl == null
-                  ? Icon(
-                      Icons.person,
-                      size: 60,
-                      color: Colors.grey[400],
-                    )
-                  : null,
+              child: Icon(
+                Icons.person,
+                size: 60,
+                color: Colors.grey[400],
+              ),
             ),
           ),
           const SizedBox(height: 20),
@@ -255,8 +249,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
           _buildInfoRow('Username', _userData?['username'] ?? 'Not set'),
           _buildInfoRow('Email', _currentUser?.email ?? 'Not set'),
           _buildInfoRow('Phone', _userData?['phone'] ?? 'Not set'),
-          _buildInfoRow('Handicap', _userData?['handicap']?.toString() ?? 'Not set'),
-          _buildInfoRow('Experience Level', _userData?['experience_level'] ?? 'Not set'),
         ],
       ),
     );

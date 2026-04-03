@@ -220,7 +220,7 @@ class _PlaybackScreenState extends State<PlaybackScreen> {
       // Check if data is stored as Map (legacy) or List (Supabase JSONB array)
       _leftFootPressure = _parsePressureData(heatmapData['leftFoot']);
       _rightFootPressure = _parsePressureData(heatmapData['rightFoot']);
-      _currentSwingPhase = heatmapData['swingPhase'] ?? heatmapData['swing_phase'] ?? 'Ready';
+      _currentSwingPhase = 'Ready';
     } else {
       // สร้างข้อมูล heatmap เริ่มต้น (5x5 grid)
       _leftFootPressure = List.generate(5, (_) => List.filled(5, 0.0));
