@@ -1,11 +1,19 @@
-// --- COPY & PASTE ไฟล์นี้ทับของเดิมได้เลย ---
 import 'dart:async';
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:golf_force_plate/screens/history_screen.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:golf_force_plate/theme.dart'; // Import theme definitions
+import 'package:golf_force_plate/widgets/smooth_heatmap.dart';
+import 'package:golf_force_plate/widgets/combined_heatmap.dart';
+import 'package:golf_force_plate/screens/sensor_display_screen.dart';
+import 'package:golf_force_plate/screens/auth_screen.dart';
+import 'package:camera/camera.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:path/path.dart' as p;
+import 'dart:io';
+
+import 'package:golf_force_plate/services/serial_service.dart'; // Import SerialService
 
 class PresentationDashboard extends StatefulWidget {
   const PresentationDashboard({super.key});
@@ -26,80 +34,532 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
   double _graphXValue = 0;
   final Random _random = Random();
 
+  // Heatmap data
+  List<List<double>> _leftFootPressure = [];
+  List<List<double>> _rightFootPressure = [];
+  Offset _liveCoP = const Offset(0.5, 0.5); // Live Center of Pressure
+  bool _showHeatmap = true;
+
+  // Force tracking (matching Processing Ver2 logic)
+  double _totalForceLeft = 0.0;
+  double _totalForceRight = 0.0;
+  static const double _forceThreshold = 300.0; // Min force to calculate balance
+  
+  // Total force history for dual-line graph
+  List<FlSpot> _totalForceDataPoints = [];
+
+  // Camera
+  CameraController? _cameraController;
+  Future<void>? _initializeControllerFuture;
+  bool _isRecording = false;
+  List<CameraDescription> _availableCamerasList = [];
+  int _selectedCameraIndex = 0;
+
+  final SupabaseClient _supabase = Supabase.instance.client;
+
+  // Serial Port
+  final SerialService _serialService = SerialService();
+  List<String> _availablePorts = [];
+  String? _selectedPort;
+  bool _isSerialConnected = false;
+  StreamSubscription<List<int>>? _serialSubscription;
+  
+  // Real-time recording buffer
+  List<Map<String, dynamic>> _recordedDataBuffer = [];
+  
+  // Auto-recording based on pressure detection
+  bool _autoRecordEnabled = false;      // Auto-record mode starts DISABLED
+  int _lowForceCounter = 0;             // Count frames below threshold
+  static const int _stopDelay = 15;     // Frames to wait before auto-stop (~1.5 sec at 100ms)
+
+
+
   @override
   void initState() {
     super.initState();
     _initializeGraphWithBaseline();
+    _initializeHeatmapData();
+    _initializeCamera();
+    _restoreSerialConnection();
+  }
+  
+  void _restoreSerialConnection() {
+    // Check if singleton is already connected
+    if (_serialService.isConnected) {
+      _isSerialConnected = true;
+      _selectedPort = _serialService.connectedPort;
+      // Subscribe to data stream
+      _serialSubscription?.cancel();
+      _serialSubscription = _serialService.dataStream.listen(_processSerialData);
+      
+      // Show calibration modal only if NOT calibrated
+      if (!_serialService.isCalibrated) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _showCalibrationModal();
+        });
+      }
+    }
+  }
+
+  // --- Calibration ---
+  // --- Calibration ---
+  void _showCalibrationModal() {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      barrierColor: Colors.black87,
+      builder: (ctx) => _CalibrationDialog(
+        onSkip: () {
+          Navigator.of(ctx).pop();
+          _showRecordModeSelectionDialog();
+        },
+        onCalibrationComplete: (baseline) {
+          Navigator.of(ctx).pop();
+          // Force UI update
+          setState(() {}); 
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Row(
+                children: [
+                  const Icon(Icons.check_circle, color: Colors.white, size: 18),
+                  const SizedBox(width: 8),
+                  Text('Calibrated! Baseline: ${baseline.toStringAsFixed(0)}'),
+                ],
+              ),
+              backgroundColor: const Color(0xFF10B981),
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+          );
+          _showRecordModeSelectionDialog();
+        },
+      ),
+    );
+  }
+
+  void _showRecordModeSelectionDialog() {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      barrierColor: Colors.black87,
+      builder: (ctx) => Dialog(
+        backgroundColor: AppColors.surfaceDark,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        child: Container(
+          padding: const EdgeInsets.all(24),
+          constraints: const BoxConstraints(maxWidth: 400),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.video_camera_back, size: 48, color: AppColors.primary),
+              const SizedBox(height: 16),
+              const Text(
+                'Select Recording Mode',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'How would you like to record your swings?',
+                style: TextStyle(fontSize: 14, color: Colors.white.withOpacity(0.7)),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 24),
+              
+              // Auto Mode
+              InkWell(
+                onTap: () {
+                  setState(() => _autoRecordEnabled = true);
+                  Navigator.of(ctx).pop();
+                },
+                borderRadius: BorderRadius.circular(16),
+                child: Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: AppColors.surfaceLight,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: AppColors.primary, width: 2),
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: AppColors.primary.withOpacity(0.2),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(Icons.auto_awesome, color: AppColors.primary, size: 24),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text('Auto Record', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
+                            const SizedBox(height: 4),
+                            Text('Starts automatically when stepping on mat', style: TextStyle(fontSize: 12, color: Colors.white.withOpacity(0.7))),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              
+              // Manual Mode
+              InkWell(
+                onTap: () {
+                  setState(() => _autoRecordEnabled = false);
+                  Navigator.of(ctx).pop();
+                },
+                borderRadius: BorderRadius.circular(16),
+                child: Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: AppColors.surfaceLight,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: Colors.transparent, width: 2),
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.1),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(Icons.touch_app, color: Colors.white70, size: 24),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text('Manual Record', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
+                            const SizedBox(height: 4),
+                            Text('Tap button to start and stop recordings', style: TextStyle(fontSize: 12, color: Colors.white.withOpacity(0.7))),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _initializeCamera() async {
+    try {
+      final cameras = await availableCameras();
+      // Log all available cameras for debugging
+      for (int i = 0; i < cameras.length; i++) {
+        debugPrint('Camera $i: ${cameras[i].name} (${cameras[i].lensDirection})');
+      }
+      if (cameras.isNotEmpty) {
+        _availableCamerasList = cameras;
+        // Default to last camera (often USB webcam)
+        _selectedCameraIndex = cameras.length - 1;
+        await _startCamera(_selectedCameraIndex);
+      }
+    } catch (e) {
+      debugPrint('Error initializing camera: $e');
+    }
+  }
+
+  Future<void> _startCamera(int index) async {
+    // Dispose old controller
+    await _cameraController?.dispose();
+    _cameraController = null;
+    _initializeControllerFuture = null;
+    if (mounted) setState(() {});
+
+    final selectedCamera = _availableCamerasList[index];
+    debugPrint('Starting camera: ${selectedCamera.name}');
+    _cameraController = CameraController(
+      selectedCamera,
+      ResolutionPreset.high,
+    );
+    _initializeControllerFuture = _cameraController!.initialize();
+    _selectedCameraIndex = index;
+    if (mounted) setState(() {});
+  }
+
+  void _initializeHeatmapData() {
+    // Initialize with 5x5 grids of zeros (will be updated with real sensor data)
+    _leftFootPressure = List.generate(5, (_) => List.filled(5, 0.0));
+    _rightFootPressure = List.generate(5, (_) => List.filled(5, 0.0));
   }
 
   void _initializeGraphWithBaseline() {
     _leftDataPoints.clear();
     _rightDataPoints.clear();
+    _totalForceDataPoints.clear();
     _graphXValue = 0;
-
-    // สร้างจุดเริ่มต้นมากขึ้นเพื่อให้เห็นเส้นฐานชัดเจน
-    for (int i = 0; i < 20; i++) {
-      double x = i * 0.1;
-      _leftDataPoints.add(FlSpot(x, 50.0));
-      _rightDataPoints.add(FlSpot(x, 50.0));
-      _graphXValue = x;
-    }
-
     setState(() {});
+  }
+
+  // --- Save Loading Modal Helpers ---
+  void _showSaveLoadingDialog(String message) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      barrierColor: Colors.black54,
+      builder: (ctx) => PopScope(
+        canPop: false,
+        child: Center(
+          child: Container(
+            width: 260,
+            padding: const EdgeInsets.symmetric(vertical: 28, horizontal: 24),
+            decoration: BoxDecoration(
+              color: const Color(0xFF1E293B),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: Colors.white.withOpacity(0.08)),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const SizedBox(
+                  width: 40, height: 40,
+                  child: CircularProgressIndicator(color: Colors.cyanAccent, strokeWidth: 3),
+                ),
+                const SizedBox(height: 20),
+                Text(message,
+                  style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600, decoration: TextDecoration.none),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 6),
+                Text('Please wait...',
+                  style: TextStyle(color: Colors.white.withOpacity(0.4), fontSize: 11, decoration: TextDecoration.none),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showSaveResultDialog({required bool success, String? errorMsg}) {
+    // Dismiss loading dialog
+    if (mounted && Navigator.canPop(context)) Navigator.pop(context);
+
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      barrierColor: Colors.black38,
+      builder: (ctx) => Center(
+        child: Container(
+          width: 260,
+          padding: const EdgeInsets.symmetric(vertical: 28, horizontal: 24),
+          decoration: BoxDecoration(
+            color: const Color(0xFF1E293B),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: (success ? Colors.greenAccent : Colors.redAccent).withOpacity(0.2)),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: (success ? Colors.greenAccent : Colors.redAccent).withOpacity(0.15),
+                ),
+                child: Icon(
+                  success ? Icons.check_circle : Icons.error_outline,
+                  color: success ? Colors.greenAccent : Colors.redAccent,
+                  size: 36,
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                success ? 'Saved Successfully' : 'Save Failed',
+                style: TextStyle(
+                  color: success ? Colors.greenAccent : Colors.redAccent,
+                  fontSize: 16, fontWeight: FontWeight.w700, decoration: TextDecoration.none,
+                ),
+              ),
+              if (!success && errorMsg != null) ...[
+                const SizedBox(height: 8),
+                Text(errorMsg,
+                  style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 11, decoration: TextDecoration.none),
+                  textAlign: TextAlign.center, maxLines: 3, overflow: TextOverflow.ellipsis,
+                ),
+              ],
+              const SizedBox(height: 16),
+              SizedBox(
+                width: double.infinity,
+                height: 38,
+                child: ElevatedButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: (success ? Colors.greenAccent : Colors.redAccent).withOpacity(0.15),
+                    foregroundColor: success ? Colors.greenAccent : Colors.redAccent,
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                  child: const Text('OK', style: TextStyle(fontWeight: FontWeight.w600)),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    // Auto-dismiss success dialog after 2 seconds
+    if (success) {
+      Future.delayed(const Duration(seconds: 2), () {
+        if (mounted && Navigator.canPop(context)) Navigator.pop(context);
+      });
+    }
   }
 
   Future<void> _saveSwingSession(
     List<FlSpot> leftData,
-    List<FlSpot> rightData,
-  ) async {
-    final user = FirebaseAuth.instance.currentUser;
+    List<FlSpot> rightData, {
+    String? videoPath,
+    List<Map<String, dynamic>>? recordedData,
+  }) async {
+    final user = _supabase.auth.currentUser;
     if (user == null) return;
-    final List<Map<String, double>> dataPoints = [];
-    for (int i = 0; i < leftData.length; i++) {
-      dataPoints.add({
-        't': leftData[i].x,
-        'l': leftData[i].y,
-        'r': rightData[i].y,
-      });
+
+    // Show loading modal
+    if (mounted) _showSaveLoadingDialog(videoPath != null ? 'Uploading video...' : 'Saving session...');
+
+    String? publicVideoUrl;
+    if (videoPath != null) {
+      final videoFile = File(videoPath);
+      if (videoFile.existsSync()) {
+        try {
+          final fileName = 'swing_${DateTime.now().millisecondsSinceEpoch}.mp4';
+          final path = '${user.id}/$fileName';
+          
+          await _supabase.storage.from('swing-videos').upload(
+            path,
+            videoFile,
+            fileOptions: const FileOptions(cacheControl: '3600', upsert: false),
+          );
+          
+          publicVideoUrl = _supabase.storage.from('swing-videos').getPublicUrl(path);
+        } catch (e) {
+          debugPrint('Error uploading video: $e');
+        }
+      }
     }
+
+    final List<Map<String, dynamic>> dataPointsToSave;
+
+    if (recordedData != null && recordedData.isNotEmpty) {
+       dataPointsToSave = recordedData;
+    } else {
+       dataPointsToSave = [];
+       for (int i = 0; i < leftData.length; i++) {
+         dataPointsToSave.add({
+           't': leftData[i].x,
+           'l': leftData[i].y,
+           'r': rightData[i].y,
+         });
+       }
+    }
+
+    final Map<String, dynamic> heatmapData = {
+      'leftFoot': _leftFootPressure,
+      'rightFoot': _rightFootPressure,
+      'swingPhase': _swingPhase,
+    };
+
     try {
-      await FirebaseFirestore.instance.collection('swings').add({
-        'userId': user.uid,
-        'timestamp': Timestamp.now(),
-        'dataPoints': dataPoints,
-      });
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Swing session saved!'),
-            backgroundColor: Colors.green,
-          ),
-        );
-      }
+      final Map<String, dynamic> sessionData = {
+        'user_id': user.id,
+        'timestamp': DateTime.now().toIso8601String(),
+        'data_points': dataPointsToSave,
+        'heatmap_data': heatmapData,
+        'video_path': publicVideoUrl,
+      };
+
+      await _supabase.from('swings').insert(sessionData);
+
+      if (mounted) _showSaveResultDialog(success: true);
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to save session: $e'),
-            backgroundColor: Colors.redAccent,
-          ),
-        );
-      }
+      if (mounted) _showSaveResultDialog(success: false, errorMsg: '$e');
     }
   }
 
-  void _simulateSwing() {
-    if (_isSwinging) return;
+  Future<void> _handleRecordButtonPress() async {
+    if (_isSerialConnected) {
+      if (_isSwinging) {
+        // Stop Real Recording
+        _isRecording = false;
+        _isSwinging = false;
+        setState(() => _swingPhase = "Saving...");
 
-    // --- จุดแก้ไขสำคัญ ---
-    setState(() {
-      _leftDataPoints = [];
-      _rightDataPoints = [];
-      _graphXValue = 0;
-      _isSwinging = true;
-      _swingPhase = "Backswing";
-    });
-    // --------------------
+        String? recordedPath;
+        if (_cameraController != null && _cameraController!.value.isRecordingVideo) {
+          try {
+            final file = await _cameraController!.stopVideoRecording();
+            recordedPath = file.path;
+          } catch (e) {
+            debugPrint('Error stopping video recording: $e');
+          }
+        }
+
+        // Use buffered data
+        await _saveSwingSession([], [], videoPath: recordedPath, recordedData: List.from(_recordedDataBuffer));
+        
+        // Reset graph but keep serial streaming
+        if (mounted) {
+          setState(() {
+            _swingPhase = "Ready";
+            _leftDataPoints = [];
+            _rightDataPoints = [];
+            _totalForceDataPoints = [];
+            _graphXValue = 0;
+          });
+        }
+        return;
+      } else {
+        // Start Real Recording
+        if (_cameraController != null && 
+            _cameraController!.value.isInitialized && 
+            !_cameraController!.value.isRecordingVideo) {
+          try {
+            await _cameraController!.startVideoRecording();
+            _isRecording = true;
+          } catch (e) {
+            debugPrint('Error starting video recording: $e');
+          }
+        }
+
+        setState(() {
+          _leftDataPoints = [];
+          _rightDataPoints = [];
+          _recordedDataBuffer = [];
+          _graphXValue = 0;
+          _isSwinging = true;
+          _swingPhase = "Recording...";
+        });
+        return;
+      }
+    }
+
+    // Simulation Path
+
+    // Start video recording for simulation too
+    if (_cameraController != null && 
+        _cameraController!.value.isInitialized && 
+        !_cameraController!.value.isRecordingVideo) {
+      try {
+        await _cameraController!.startVideoRecording();
+        _isRecording = true;
+      } catch (e) {
+        debugPrint('Error starting video recording (simulation): $e');
+      }
+    }
 
     final List<FlSpot> currentSwingL = [];
     final List<FlSpot> currentSwingR = [];
@@ -112,7 +572,7 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
     _simulationTimer?.cancel();
     _simulationTimer = Timer.periodic(const Duration(milliseconds: 40), (
       timer,
-    ) {
+    ) async {
       if (!mounted) {
         timer.cancel();
         return;
@@ -122,14 +582,14 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
       double left;
 
       if (swingTime < 1.5) {
-        if (mounted) setState(() => _swingPhase = "Backswing");
+        if (mounted && _swingPhase != "Backswing") setState(() => _swingPhase = "Backswing");
         left = 50 - backswingPeak * (swingTime / 1.5);
       } else if (swingTime < 2.0) {
-        if (mounted) setState(() => _swingPhase = "Transition");
+        if (mounted && _swingPhase != "Transition") setState(() => _swingPhase = "Transition");
         left =
             (50 - backswingPeak) + transitionPeak * ((swingTime - 1.5) / 0.5);
       } else if (swingTime < 3.5) {
-        if (mounted) setState(() => _swingPhase = "Finish");
+        if (mounted && _swingPhase != "Finish") setState(() => _swingPhase = "Finish");
         left =
             (50 - backswingPeak + transitionPeak) +
             (finishPeak - (50 - backswingPeak + transitionPeak)) *
@@ -139,7 +599,20 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
         if (mounted) setState(() => _swingPhase = "Saving...");
         timer.cancel();
 
-        _saveSwingSession(currentSwingL, currentSwingR);
+        String? recordedPath;
+        // Stop Video Recording
+        if (_cameraController != null && _cameraController!.value.isRecordingVideo) {
+          try {
+            final file = await _cameraController!.stopVideoRecording();
+            _isRecording = false;
+            recordedPath = file.path;
+            debugPrint('Video saved to: ${file.path}');
+          } catch (e) {
+            debugPrint('Error stopping video recording: $e');
+          }
+        }
+
+        _saveSwingSession(currentSwingL, currentSwingR, videoPath: recordedPath);
         _returnToBaseline();
         return;
       }
@@ -158,7 +631,7 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
       if (!mounted || (_leftWeightPercent - 50.0).abs() < 1.0) {
         if (mounted) {
           setState(() => _swingPhase = "Ready");
-          _initializeGraphWithBaseline(); // รีเซ็ตกราฟกลับเป็นเส้นฐาน
+          _initializeGraphWithBaseline();
         }
         backTimer.cancel();
       } else {
@@ -166,6 +639,76 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
         _updateData(newLeft, 100 - newLeft);
       }
     });
+  }
+
+  /// Auto-start recording when person steps on mat
+  Future<void> _startAutoRecording() async {
+    if (!mounted) return;
+    
+    // Start video recording FIRST (async, takes time to init)
+    if (_cameraController != null && 
+        _cameraController!.value.isInitialized && 
+        !_cameraController!.value.isRecordingVideo) {
+      try {
+        await _cameraController!.startVideoRecording();
+      } catch (e) {
+        debugPrint('Error starting video recording: $e');
+      }
+    }
+    
+    // Reset data buffer AFTER video starts → both start at the same time
+    if (!mounted) return;
+    setState(() {
+      _isRecording = true;
+      _isSwinging = true;
+      _swingPhase = "AUTO Recording...";
+      _recordedDataBuffer = [];
+      _leftDataPoints = [];
+      _rightDataPoints = [];
+      _totalForceDataPoints = [];
+      _graphXValue = 0;
+      _lowForceCounter = 0;
+    });
+    
+    debugPrint('Auto-recording started');
+  }
+
+  /// Auto-stop recording when person steps off mat
+  Future<void> _stopAutoRecording() async {
+    if (!mounted) return;
+    
+    setState(() {
+      _isRecording = false;
+      _isSwinging = false;
+      _swingPhase = "Saving...";
+    });
+    
+    String? recordedPath;
+    
+    // Stop video recording
+    if (_cameraController != null && _cameraController!.value.isRecordingVideo) {
+      try {
+        final file = await _cameraController!.stopVideoRecording();
+        recordedPath = file.path;
+      } catch (e) {
+        debugPrint('Error stopping video recording: $e');
+      }
+    }
+    
+    // Save the recorded data
+    if (_recordedDataBuffer.isNotEmpty) {
+      await _saveSwingSession([], [], videoPath: recordedPath, recordedData: List.from(_recordedDataBuffer));
+    }
+    
+    // Reset state
+    if (mounted) {
+      setState(() {
+        _swingPhase = "Ready";
+        _lowForceCounter = 0;
+      });
+    }
+    
+    debugPrint('Auto-recording stopped, saved ${_recordedDataBuffer.length} data points');
   }
 
   void _updateData(double left, double right) {
@@ -177,7 +720,6 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
 
       _graphXValue += 0.04;
 
-      // เก็บข้อมูลเฉพาะ 50 จุดล่าสุด
       if (_leftDataPoints.length > 50) {
         _leftDataPoints.removeAt(0);
         _rightDataPoints.removeAt(0);
@@ -185,33 +727,379 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
 
       _leftDataPoints.add(FlSpot(_graphXValue, left));
       _rightDataPoints.add(FlSpot(_graphXValue, right));
+
+      // Generate random 5x5 grids for display when simulating
+      _leftFootPressure = List.generate(5, (_) =>
+        List.generate(5, (_) => _random.nextDouble() * 100)
+      );
+      _rightFootPressure = List.generate(5, (_) =>
+        List.generate(5, (_) => _random.nextDouble() * 100)
+      );
     });
   }
 
+  void _initSerial() {
+    setState(() {
+      _availablePorts = _serialService.getAvailablePorts();
+    });
+  }
+
+  void _showConnectionDialog() {
+    _initSerial(); // Refresh ports
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Connect to Sensor Board'),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (_availablePorts.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.all(16.0),
+                  child: Text('No serial ports found.'),
+                )
+              else
+                ..._availablePorts.map((port) => ListTile(
+                      title: Text(port),
+                      leading: const Icon(Icons.usb),
+                      trailing: _selectedPort == port && _isSerialConnected
+                          ? const Icon(Icons.check_circle, color: Colors.green)
+                          : null,
+                      onTap: () {
+                        Navigator.pop(context);
+                        _connectToPort(port);
+                      },
+                    )),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          if (_isSerialConnected)
+            TextButton(
+              onPressed: () {
+                Navigator.pop(context);
+                _disconnectFromPort();
+              },
+              child: const Text('Disconnect', style: TextStyle(color: Colors.red)),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _connectToPort(String portName) async {
+    try {
+      await _serialService.connect(portName);
+      setState(() {
+        _selectedPort = portName;
+        _isSerialConnected = true;
+      });
+      
+      _serialSubscription?.cancel();
+      _serialSubscription = _serialService.dataStream.listen(_processSerialData);
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Connected to $portName')),
+        );
+      }
+    } catch (e) {
+      debugPrint('Error connecting to port: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Connection failed: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
+  Future<void> _disconnectFromPort() async {
+    await _serialService.disconnect();
+    _serialSubscription?.cancel();
+    setState(() {
+      _isSerialConnected = false;
+      _selectedPort = null;
+    });
+  }
+
+  void _processSerialData(List<int> sensors) {
+    if (!mounted) return;
+
+    // Map sensors to 5x5 grids (raw values 0-4095)
+    // Swapped: Left Foot uses sensors 32-56, Right Foot uses sensors 0-24
+    final leftGrid5x5 = _mapTo5x5Grid(sensors, 32);
+    final rightGrid5x5 = _mapTo5x5Grid(sensors, 0);
+    
+    // Flip all rows of right foot horizontally (mirror left-right)
+    for (int i = 0; i < rightGrid5x5.length; i++) {
+      rightGrid5x5[i] = rightGrid5x5[i].reversed.toList();
+    }
+    
+    // Flip the top row (index 0) of right foot horizontally
+    if (rightGrid5x5.isNotEmpty) {
+      rightGrid5x5[0] = rightGrid5x5[0].reversed.toList();
+    }
+    
+    // Flip the bottom row (index 4) of left foot horizontally
+    if (leftGrid5x5.isNotEmpty && leftGrid5x5.length > 4) {
+      leftGrid5x5[4] = leftGrid5x5[4].reversed.toList();
+    }
+
+    // Calculate total force for each foot
+    double leftTotal = 0;
+    double rightTotal = 0;
+
+    for(var row in leftGrid5x5) {
+      for(var val in row) leftTotal += val;
+    }
+    for(var row in rightGrid5x5) {
+      for(var val in row) rightTotal += val;
+    }
+
+    // Store raw force values
+    _totalForceLeft = leftTotal;
+    _totalForceRight = rightTotal;
+    double totalSystemForce = leftTotal + rightTotal;
+    
+    // Apply threshold logic (matching Processing Ver2)
+    double leftPercent;
+    double rightPercent;
+    
+    if (totalSystemForce > _forceThreshold) {
+      // Calculate actual balance when force is above threshold
+      leftPercent = (leftTotal / totalSystemForce) * 100;
+      rightPercent = (rightTotal / totalSystemForce) * 100;
+    } else {
+      // Below threshold: show 0% (no one standing)
+      leftPercent = 0.0;
+      rightPercent = 0.0;
+    }
+    
+    // Normalize 5x5 grids to 0-100 for display
+    const double maxRawValue = 4095.0;
+    final leftGridDisplay = leftGrid5x5.map((row) => 
+      row.map((v) => (v / maxRawValue * 100.0).clamp(0.0, 100.0)).toList()
+    ).toList();
+    final rightGridDisplay = rightGrid5x5.map((row) => 
+      row.map((v) => (v / maxRawValue * 100.0).clamp(0.0, 100.0)).toList()
+    ).toList();
+
+    _updateDataFromSerial(leftPercent, rightPercent, leftGridDisplay, rightGridDisplay, totalSystemForce);
+    
+    // Auto-recording logic
+    if (_autoRecordEnabled && _isSerialConnected) {
+      final bool forceAboveThreshold = totalSystemForce > _forceThreshold;
+      
+      if (forceAboveThreshold) {
+        // Person is standing on mat
+        _lowForceCounter = 0; // Reset counter
+        
+        if (!_isRecording && !_isSwinging) {
+          // Auto-start recording
+          _startAutoRecording();
+        }
+      } else {
+        // Force below threshold
+        if (_isRecording) {
+          _lowForceCounter++;
+          
+          if (_lowForceCounter >= _stopDelay) {
+            // Auto-stop recording after delay
+            _stopAutoRecording();
+          }
+        }
+      }
+    }
+    
+    // If recording, buffer the data
+    if (_isRecording) {
+      _recordedDataBuffer.add({
+        't': DateTime.now().millisecondsSinceEpoch,
+        'l': leftPercent,
+        'r': rightPercent,
+        'raw_left': leftGrid5x5,
+        'raw_right': rightGrid5x5,
+        'total_force': totalSystemForce,
+      });
+    }
+  }
+
+  List<List<double>> _mapTo5x5Grid(List<int> sensors, int startIndex) {
+    List<List<double>> grid = [];
+    for (int i = 0; i < 5; i++) {
+      List<double> row = [];
+      for (int j = 0; j < 5; j++) {
+        // Index calculation: startIndex + (row * 5) + col
+        int index = startIndex + (i * 5) + j;
+        if (index < sensors.length) {
+          row.add(sensors[index].toDouble());
+        } else {
+          row.add(0.0);
+        }
+      }
+      grid.add(row);
+    }
+    return grid;
+  }
+  // _scaleTo10x6 removed - now using 5x5 grids directly with SimpleGridHeatmap
+  
+  void _updateDataFromSerial(double left, double right, List<List<double>> leftHeatmap, List<List<double>> rightHeatmap, double totalForce) {
+      setState(() {
+        _leftWeightPercent = left;
+        _rightWeightPercent = right;
+
+        _graphXValue += 0.04; // Approximate 25Hz or use real time diff
+
+        if (_leftDataPoints.length > 50) {
+          _leftDataPoints.removeAt(0);
+          _rightDataPoints.removeAt(0);
+          _totalForceDataPoints.removeAt(0);
+        }
+
+        _leftDataPoints.add(FlSpot(_graphXValue, left));
+        _rightDataPoints.add(FlSpot(_graphXValue, right));
+        
+        // xBW normalization: if calibrated, express as multiples of body weight
+        // xBW normalization: if calibrated, express as multiples of body weight
+        double grfValue;
+        if (_serialService.isCalibrated && _serialService.baselineForce > 0) {
+          grfValue = (totalForce / _serialService.baselineForce).clamp(0.0, 3.0);
+        } else {
+          grfValue = (totalForce / 30000.0 * 100.0).clamp(0.0, 100.0);
+        }
+        _totalForceDataPoints.add(FlSpot(_graphXValue, grfValue));
+
+        _leftFootPressure = leftHeatmap;
+        _rightFootPressure = rightHeatmap;
+
+        // Compute live CoP across both feet
+        _liveCoP = _computeLiveCoP(leftHeatmap, rightHeatmap);
+      });
+  }
+
+  /// Compute unified Center of Pressure across both feet (live)
+  /// Left foot occupies X 0.0-0.5, Right foot occupies X 0.5-1.0
+  Offset _computeLiveCoP(List<List<double>> leftGrid, List<List<double>> rightGrid) {
+    double totalP = 0, wx = 0, wy = 0;
+
+    void processGrid(List<List<double>> grid, double xOffset, double xScale) {
+      final rows = grid.length;
+      final cols = rows > 0 ? grid[0].length : 0;
+      for (int r = 0; r < rows; r++) {
+        for (int c = 0; c < cols; c++) {
+          final p = grid[r][c];
+          if (p > 0) {
+            totalP += p;
+            wx += p * (xOffset + (cols > 1 ? c / (cols - 1) : 0.5) * xScale);
+            wy += p * (rows > 1 ? r / (rows - 1) : 0.5);
+          }
+        }
+      }
+    }
+
+    processGrid(leftGrid, 0.0, 0.5);   // left half
+    processGrid(rightGrid, 0.5, 0.5);  // right half
+
+    if (totalP < 0.01) return const Offset(0.5, 0.5);
+    return Offset((wx / totalP).clamp(0.0, 1.0), (wy / totalP).clamp(0.0, 1.0));
+  }
   @override
   void dispose() {
     _simulationTimer?.cancel();
     _leftDataPoints.clear();
     _rightDataPoints.clear();
+    _cameraController?.dispose();
+    _serialSubscription?.cancel(); // Cancel subscription but don't dispose singleton
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF111827),
+      backgroundColor: AppColors.backgroundDark,
       body: SafeArea(
         child: Padding(
-          padding: const EdgeInsets.all(20.0),
+          padding: const EdgeInsets.all(16.0),
           child: Column(
             children: [
+              // App Bar
               _buildAppBar(context),
-              const SizedBox(height: 20),
-              _buildWeightCards(),
-              const SizedBox(height: 20),
-              Expanded(child: _buildChartCard()),
-              const SizedBox(height: 20),
-              _buildRecordButton(),
+              const SizedBox(height: 16),
+              // Main Content - Two Columns
+              Expanded(
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    // Left Column: Camera + Chart
+                    Expanded(
+                    flex: 1,
+                    child: Column(
+                      children: [
+                        // Camera Preview
+                        Expanded(flex: 3, child: _buildCameraPreview()),
+                        const SizedBox(height: 8),
+                        // Left % Chart
+                        Expanded(flex: 1, child: _buildLeftChartCard()),
+                        const SizedBox(height: 8),
+                        // Right % Chart
+                        Expanded(flex: 1, child: _buildRightChartCard()),
+                        const SizedBox(height: 8),
+                        // GRF Chart
+                        Expanded(flex: 1, child: _buildGRFChartCard()),
+                      ],
+                    ),
+                  ),
+                    const SizedBox(width: 16),
+                    // Right Column: Balance + Heatmap + Record
+                    Expanded(
+                      flex: 1,
+                      child: Column(
+                        children: [
+                          // Balance Bar (compact)
+                          _buildWeightCards(),
+                          const SizedBox(height: 12),
+                          // Heatmap (takes most space)
+                          if (_showHeatmap)
+                            Expanded(child: _buildHeatmapSection()),
+                          const SizedBox(height: 12),
+                          // Auto Record Toggle
+                          if (_isSerialConnected)
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 8.0, right: 8.0),
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.end,
+                                children: [
+                                  const Text(
+                                    'Auto Record',
+                                    style: TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.bold),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Switch(
+                                    value: _autoRecordEnabled,
+                                    activeColor: AppColors.primary,
+                                    onChanged: (val) {
+                                      setState(() {
+                                        _autoRecordEnabled = val;
+                                      });
+                                    },
+                                  ),
+                                ],
+                              ),
+                            ),
+                          // Record Button (compact)
+                          SizedBox(height: 50, child: _buildRecordButton()),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ],
           ),
         ),
@@ -219,346 +1107,956 @@ class _PresentationDashboardState extends State<PresentationDashboard> {
     );
   }
 
-  // โค้ด UI Widgets ที่เหลือเหมือนเดิมทั้งหมด
   Widget _buildAppBar(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
     decoration: BoxDecoration(
-      gradient: LinearGradient(
-        colors: [
-          const Color(0xFF1E293B).withOpacity(0.8),
-          const Color(0xFF0F172A).withOpacity(0.6),
-        ],
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
-      ),
-      borderRadius: BorderRadius.circular(16),
+      color: AppColors.surfaceDark,
+      borderRadius: BorderRadius.circular(20),
+      border: Border.all(color: Colors.white.withOpacity(0.05)),
+      boxShadow: [
+        BoxShadow(
+          color: Colors.black.withOpacity(0.2),
+          blurRadius: 15,
+          offset: const Offset(0, 5),
+        ),
+      ],
     ),
-    padding: const EdgeInsets.all(16),
     child: Row(
       children: [
         Container(
-          padding: const EdgeInsets.all(8),
+          padding: const EdgeInsets.all(10),
           decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.1),
-            borderRadius: BorderRadius.circular(12),
+            color: AppColors.primary.withOpacity(0.15),
+            borderRadius: BorderRadius.circular(14),
           ),
-          child: const Icon(Icons.sports_golf, color: Colors.white, size: 28),
+          child: const Icon(Icons.sports_golf, color: AppColors.primary, size: 28),
         ),
-        const SizedBox(width: 12),
-        const Text(
-          'Force Plate',
-          style: TextStyle(
-            fontSize: 24,
-            fontWeight: FontWeight.bold,
-            color: Colors.white,
-            letterSpacing: 0.5,
+        const SizedBox(width: 16),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Pressure Map',
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                  color: Colors.white,
+                  letterSpacing: 0.5,
+                ),
+              ),
+              const SizedBox(height: 4),
+              _buildStatusBadge(),
+            ],
           ),
         ),
-        const Spacer(),
-        _buildStatusBadge(),
-        const SizedBox(width: 12),
         _buildActionButtons(context),
       ],
     ),
   );
 
-  Widget _buildStatusBadge() => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-    decoration: BoxDecoration(
-      color: _swingPhase == 'Ready'
-          ? Colors.green.withOpacity(0.2)
-          : Colors.orange.withOpacity(0.2),
-      borderRadius: BorderRadius.circular(20),
-    ),
-    child: Row(
+  Widget _buildStatusBadge() {
+    Color statusColor = _swingPhase == 'Ready'
+        ? AppColors.primary
+        : AppColors.accent;
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
       children: [
-        Icon(
-          Icons.circle,
-          color: _swingPhase == 'Ready' ? Colors.green : Colors.orange,
-          size: 10,
+        Container(
+           width: 8,
+           height: 8,
+           decoration: BoxDecoration(
+             color: statusColor,
+             shape: BoxShape.circle,
+             boxShadow: [
+               BoxShadow(color: statusColor.withOpacity(0.6), blurRadius: 6, spreadRadius: 1)
+             ]
+           ),
         ),
         const SizedBox(width: 8),
         Text(
-          _swingPhase,
+          _swingPhase.toUpperCase(),
           style: TextStyle(
-            color: Colors.white,
-            fontSize: 14,
-            fontWeight: FontWeight.w500,
+            color: statusColor,
+            fontSize: 12,
+            fontWeight: FontWeight.bold,
+            letterSpacing: 1,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildActionButtons(BuildContext context) => Row(
+    children: [
+      _buildIconButton(
+        icon: Icons.usb,
+        tooltip: _isSerialConnected ? 'Connected: $_selectedPort' : 'Connect Device',
+        color: _isSerialConnected ? Colors.green : null,
+        onPressed: _showConnectionDialog,
+      ),
+      const SizedBox(width: 8),
+      _buildIconButton(
+        icon: Icons.sensors,
+        tooltip: 'Sensor Display',
+        onPressed: () => Navigator.push(
+          context,
+          MaterialPageRoute(builder: (context) => const SensorDisplayScreen()),
+        ),
+      ),
+      const SizedBox(width: 8),
+      _buildIconButton(
+        icon: _showHeatmap ? Icons.visibility : Icons.visibility_off,
+        tooltip: _showHeatmap ? 'Hide Heatmap' : 'Show Heatmap',
+        onPressed: () => setState(() => _showHeatmap = !_showHeatmap),
+      ),
+      const SizedBox(width: 8),
+      _buildIconButton(
+        icon: Icons.logout,
+        tooltip: 'Logout',
+        color: AppColors.error,
+        onPressed: () async {
+          await _supabase.auth.signOut();
+          if (context.mounted) {
+            Navigator.of(context).pushReplacement(
+              MaterialPageRoute(builder: (context) => const AuthScreen()),
+            );
+          }
+        },
+      ),
+    ],
+  );
+
+  Widget _buildCameraPreview() {
+    return Container(
+      height: 400, // Match playback screen size
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: Colors.black,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: Colors.white.withOpacity(0.1)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.5),
+            blurRadius: 20,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          // Camera Feed
+          if (_initializeControllerFuture != null)
+            FutureBuilder<void>(
+              future: _initializeControllerFuture,
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.done &&
+                    _cameraController != null &&
+                    _cameraController!.value.isInitialized) {
+                  return Center(
+                    child: AspectRatio(
+                      aspectRatio: _cameraController!.value.aspectRatio,
+                      child: CameraPreview(_cameraController!),
+                    ),
+                  );
+                } else {
+                  return Container(
+                    color: Colors.black,
+                    child: const Center(
+                      child: CircularProgressIndicator(color: AppColors.primary),
+                    ),
+                  );
+                }
+              },
+            )
+          else
+            Container(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    Colors.grey[800]!,
+                    Colors.grey[900]!,
+                  ],
+                ),
+              ),
+              child: Icon(
+                Icons.videocam_off_outlined,
+                size: 64,
+                color: Colors.white.withOpacity(0.1),
+              ),
+            ),
+
+
+          // Status Indicators
+          Positioned(
+            top: 16,
+            left: 16,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: Colors.black54,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.circle,
+                    size: 12,
+                    color: _isSwinging ? AppColors.error : AppColors.primary,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    _isSwinging ? 'REC' : 'LIVE',
+                    style: TextStyle(
+                      color: _isSwinging ? AppColors.error : Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          // Camera Selector Dropdown
+          if (_availableCamerasList.length > 1)
+            Positioned(
+              top: 16,
+              right: 16,
+              child: Container(
+                constraints: const BoxConstraints(maxWidth: 200),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.black87,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: DropdownButton<int>(
+                  value: _selectedCameraIndex,
+                  dropdownColor: Colors.grey[900],
+                  underline: const SizedBox(),
+                  isExpanded: true,
+                  icon: const Icon(Icons.switch_camera, color: Colors.white, size: 18),
+                  style: const TextStyle(color: Colors.white, fontSize: 12),
+                  items: List.generate(_availableCamerasList.length, (i) {
+                    // Extract clean camera name (remove device path)
+                    String rawName = _availableCamerasList[i].name;
+                    String cleanName = rawName.split('<').first.trim();
+                    if (cleanName.isEmpty) cleanName = 'Camera $i';
+                    return DropdownMenuItem<int>(
+                      value: i,
+                      child: Text(
+                        cleanName,
+                        style: const TextStyle(color: Colors.white, fontSize: 12),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    );
+                  }),
+                  onChanged: (int? newIndex) {
+                    if (newIndex != null && newIndex != _selectedCameraIndex) {
+                      _startCamera(newIndex);
+                    }
+                  },
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildIconButton({
+    required IconData icon,
+    required String tooltip,
+    required VoidCallback onPressed,
+    Color? color,
+  }) {
+    return Container(
+      decoration: BoxDecoration(
+        color: (color ?? Colors.white).withOpacity(0.05),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: IconButton(
+        icon: Icon(icon, color: color ?? AppColors.textSecondary, size: 22),
+        tooltip: tooltip,
+        onPressed: onPressed,
+        constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+        padding: EdgeInsets.zero,
+      ),
+    );
+  }
+
+  // Balance Bar Chart (like Processing Ver2)
+  Widget _buildWeightCards() => Container(
+    height: 80,
+    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+    decoration: BoxDecoration(
+      borderRadius: BorderRadius.circular(16),
+      color: AppColors.surfaceDark,
+      border: Border.all(color: Colors.white.withOpacity(0.05)),
+    ),
+    child: Column(
+      children: [
+        // Labels
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(
+              'L: ${_leftWeightPercent.toInt()}%',
+              style: const TextStyle(
+                color: Colors.greenAccent,
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const Text(
+              'Balance',
+              style: TextStyle(
+                color: Colors.white70,
+                fontSize: 14,
+              ),
+            ),
+            Text(
+              'R: ${_rightWeightPercent.toInt()}%',
+              style: const TextStyle(
+                color: Colors.redAccent,
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        // Balance Bar
+        Container(
+          height: 24,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
+            color: Colors.grey[800],
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(12),
+            child: Row(
+              children: [
+                // Left (Green)
+                Expanded(
+                  flex: (_leftWeightPercent + _rightWeightPercent) > 0 
+                      ? _leftWeightPercent.toInt().clamp(0, 100)
+                      : 50,
+                  child: Container(color: Colors.green),
+                ),
+                // Right (Red)
+                Expanded(
+                  flex: (_leftWeightPercent + _rightWeightPercent) > 0 
+                      ? _rightWeightPercent.toInt().clamp(0, 100)
+                      : 50,
+                  child: Container(color: Colors.red),
+                ),
+              ],
+            ),
           ),
         ),
       ],
     ),
   );
 
-  Widget _buildActionButtons(BuildContext context) => Row(
-    children: [
-      IconButton(
-        icon: const Icon(Icons.history, color: Colors.white70),
-        tooltip: 'Swing History',
-        onPressed: () => Navigator.of(
-          context,
-        ).push(MaterialPageRoute(builder: (ctx) => const HistoryScreen())),
-      ),
-      IconButton(
-        icon: const Icon(Icons.logout, color: Colors.white70),
-        tooltip: 'Logout',
-        onPressed: () => FirebaseAuth.instance.signOut(),
-      ),
-    ],
-  );
-
-  Widget _buildWeightCards() => Row(
-    children: [
-      Expanded(
-        child: TweenAnimationBuilder<double>(
-          tween: Tween(begin: 0.0, end: 1.0),
-          duration: const Duration(milliseconds: 500),
-          builder: (context, value, child) => Transform.scale(
-            scale: value,
-            child: _WeightCard(
-              label: "Left",
-              percentage: _leftWeightPercent,
-              color: const Color(0xFF3B82F6),
-            ),
-          ),
-        ),
-      ),
-      const SizedBox(width: 16),
-      Expanded(
-        child: TweenAnimationBuilder<double>(
-          tween: Tween(begin: 0.0, end: 1.0),
-          duration: const Duration(milliseconds: 500),
-          curve: Curves.easeOutBack,
-          builder: (context, value, child) => Transform.scale(
-            scale: value,
-            child: _WeightCard(
-              label: "Right",
-              percentage: _rightWeightPercent,
-              color: const Color(0xFFEC4899),
-            ),
-          ),
-        ),
-      ),
-    ],
-  );
-
-  Widget _buildChartCard() => Container(
-    padding: const EdgeInsets.fromLTRB(20, 20, 20, 10),
+  Widget _buildLeftChartCard() => Container(
+    padding: const EdgeInsets.all(10),
     decoration: BoxDecoration(
-      borderRadius: BorderRadius.circular(24),
-      color: const Color(0xFF1F2937),
-      boxShadow: [
-        BoxShadow(
-          color: Colors.black.withOpacity(0.2),
-          blurRadius: 10,
-          offset: const Offset(0, 4),
-        ),
-      ],
-      gradient: LinearGradient(
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
-        colors: [
-          const Color(0xFF1F2937),
-          const Color(0xFF1F2937).withOpacity(0.8),
-        ],
-      ),
+      borderRadius: BorderRadius.circular(16),
+      color: AppColors.surfaceDark,
+      border: Border.all(color: Colors.white.withOpacity(0.05)),
     ),
     child: Column(
       children: [
         Row(
           children: [
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              decoration: BoxDecoration(
-                color: Colors.blue.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(12),
+              padding: const EdgeInsets.all(4),
+              decoration: BoxDecoration(color: Colors.cyanAccent.withOpacity(0.1), borderRadius: BorderRadius.circular(6)),
+              child: const Icon(Icons.arrow_back, color: Colors.cyanAccent, size: 14),
+            ),
+            const SizedBox(width: 6),
+            const Text('Left Foot %', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.cyanAccent)),
+          ],
+        ),
+        const SizedBox(height: 4),
+        Expanded(
+          child: LineChart(_buildSingleLineChartData(_leftDataPoints, Colors.cyanAccent), duration: const Duration(milliseconds: 0)),
+        ),
+      ],
+    ),
+  );
+
+  Widget _buildRightChartCard() => Container(
+    padding: const EdgeInsets.all(10),
+    decoration: BoxDecoration(
+      borderRadius: BorderRadius.circular(16),
+      color: AppColors.surfaceDark,
+      border: Border.all(color: Colors.white.withOpacity(0.05)),
+    ),
+    child: Column(
+      children: [
+        Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(4),
+              decoration: BoxDecoration(color: Colors.redAccent.withOpacity(0.1), borderRadius: BorderRadius.circular(6)),
+              child: const Icon(Icons.arrow_forward, color: Colors.redAccent, size: 14),
+            ),
+            const SizedBox(width: 6),
+            const Text('Right Foot %', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.redAccent)),
+          ],
+        ),
+        const SizedBox(height: 4),
+        Expanded(
+          child: LineChart(_buildSingleLineChartData(_rightDataPoints, Colors.redAccent), duration: const Duration(milliseconds: 0)),
+        ),
+      ],
+    ),
+  );
+
+  Widget _buildGRFChartCard() => Container(
+  padding: const EdgeInsets.all(10),
+  decoration: BoxDecoration(
+    borderRadius: BorderRadius.circular(16),
+    color: AppColors.surfaceDark,
+    border: Border.all(color: Colors.white.withOpacity(0.05)),
+  ),
+  child: Column(
+    children: [
+      Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(4),
+            decoration: BoxDecoration(color: Colors.blueAccent.withOpacity(0.1), borderRadius: BorderRadius.circular(6)),
+            child: const Icon(Icons.fitness_center, color: Colors.blueAccent, size: 14),
+          ),
+          const SizedBox(width: 6),
+          Text(
+            _serialService.isCalibrated ? 'GRF (xBW)' : 'Vertical Force (GRF)',
+            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.blueAccent),
+          ),
+          const Spacer(),
+          if (_isSerialConnected)
+            GestureDetector(
+              onTap: _showCalibrationModal,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: (_serialService.isCalibrated ? Colors.greenAccent : Colors.amber).withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      _serialService.isCalibrated ? Icons.check_circle : Icons.tune,
+                      size: 10,
+                      color: _serialService.isCalibrated ? Colors.greenAccent : Colors.amber,
+                    ),
+                    const SizedBox(width: 3),
+                    Text(
+                      _serialService.isCalibrated ? 'Calibrated' : 'Calibrate',
+                      style: TextStyle(
+                        fontSize: 9,
+                        fontWeight: FontWeight.w600,
+                        color: _serialService.isCalibrated ? Colors.greenAccent : Colors.amber,
+                      ),
+                    ),
+                  ],
+                ),
               ),
-              child: const Row(
+            ),
+        ],
+      ),
+      const SizedBox(height: 4),
+      Expanded(
+        child: LineChart(
+          _buildGRFChartData(),
+          duration: const Duration(milliseconds: 0),
+        ),
+      ),
+    ],
+  ),
+);
+
+  Widget _buildHeatmapSection() => Container(
+    padding: const EdgeInsets.all(24),
+    decoration: BoxDecoration(
+      borderRadius: BorderRadius.circular(24),
+      color: AppColors.surfaceDark,
+      boxShadow: [
+        BoxShadow(
+          color: Colors.black.withOpacity(0.3),
+          blurRadius: 20,
+          offset: const Offset(0, 10),
+        ),
+      ],
+      border: Border.all(color: Colors.white.withOpacity(0.05)),
+    ),
+    child: Column(
+      children: [
+        Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: AppColors.accent.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const Icon(Icons.thermostat, color: AppColors.accent, size: 20),
+            ),
+            const SizedBox(width: 12),
+            const Text(
+              'Foot Pressure',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const Spacer(),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.05),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Text(
+                _swingPhase,
+                style: const TextStyle(
+                  color: AppColors.textSecondary,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Expanded(
+          child: CombinedHeatmap(
+            leftPressureData: _leftFootPressure,
+            rightPressureData: _rightFootPressure,
+            copTrace: [_liveCoP],
+            currentTraceIndex: 0,
+            onTap: () => _updateHeatmapData(),
+          ),
+        ),
+        const SizedBox(height: 16),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          decoration: BoxDecoration(
+            color: AppColors.backgroundDark,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: FittedBox(
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                _buildHeatmapLegendItem('Low', Colors.blue),
+                const SizedBox(width: 12),
+                _buildHeatmapLegendItem('Medium', Colors.cyan),
+                const SizedBox(width: 12),
+                _buildHeatmapLegendItem('High', Colors.yellow),
+                const SizedBox(width: 12),
+                _buildHeatmapLegendItem('Max', Colors.red),
+              ],
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+
+  Widget _buildHeatmapLegendItem(String label, Color color) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 10,
+          height: 10,
+          decoration: BoxDecoration(
+            color: color,
+            shape: BoxShape.circle,
+          ),
+        ),
+        const SizedBox(width: 6),
+        Text(
+          label,
+          style: const TextStyle(color: AppColors.textSecondary, fontSize: 10),
+        ),
+      ],
+    );
+  }
+
+  void _updateHeatmapData() {
+    setState(() {
+      // Generate random 5x5 grids for testing (values 0-100)
+      _leftFootPressure = List.generate(5, (_) =>
+        List.generate(5, (_) => _random.nextDouble() * 100)
+      );
+      _rightFootPressure = List.generate(5, (_) =>
+        List.generate(5, (_) => _random.nextDouble() * 100)
+      );
+    });
+  }
+
+  Map<String, dynamic> _convert2DArrayToMap(List<List<double>> array2D) {
+    final Map<String, dynamic> result = {};
+    for (int i = 0; i < array2D.length; i++) {
+      final Map<String, dynamic> row = {};
+      for (int j = 0; j < array2D[i].length; j++) {
+        row['col$j'] = array2D[i][j];
+      }
+      result['row$i'] = row;
+    }
+    return result;
+  }
+
+
+
+  Widget _buildRecordButton() {
+    // When connected to serial: show auto-record status
+    if (_isSerialConnected && _autoRecordEnabled) {
+      return Container(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(30),
+          boxShadow: [
+            BoxShadow(
+              color: (_isRecording ? Colors.red : Colors.green).withOpacity(0.3),
+              blurRadius: 20,
+              spreadRadius: 0,
+              offset: const Offset(0, 8),
+            ),
+          ],
+        ),
+        child: SizedBox(
+          width: double.infinity,
+          height: 64,
+          child: Container(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(30),
+              color: _isRecording ? Colors.red.shade800 : const Color(0xFF1F2937),
+              border: Border.all(
+                color: _isRecording ? Colors.red : Colors.green,
+                width: 2,
+              ),
+            ),
+            child: Center(
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(Icons.show_chart, color: Colors.blue, size: 18),
-                  SizedBox(width: 8),
+                  Icon(
+                    _isRecording ? Icons.fiber_manual_record : Icons.sensors,
+                    color: _isRecording ? Colors.red.shade200 : Colors.green,
+                    size: 24,
+                  ),
+                  const SizedBox(width: 12),
                   Text(
-                    'Balance Analysis',
+                    _isRecording ? 'AUTO RECORDING...' : 'AUTO • Step on mat to record',
                     style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w600,
-                      color: Colors.white,
+                      color: _isRecording ? Colors.white : Colors.grey.shade300,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.5,
                     ),
                   ),
                 ],
               ),
             ),
-            const Spacer(),
-            _LegendItem(label: 'Left', color: const Color(0xFF3B82F6)),
-            const SizedBox(width: 16),
-            _LegendItem(label: 'Right', color: const Color(0xFFEC4899)),
-          ],
-        ),
-        const SizedBox(height: 20),
-        Expanded(
-          child: LineChart(
-            _buildChartData(),
-            duration: const Duration(milliseconds: 0),
           ),
         ),
-      ],
-    ),
-  );
-
-  Widget _buildRecordButton() => Container(
-    decoration: BoxDecoration(
-      borderRadius: BorderRadius.circular(30),
-      boxShadow: [
-        BoxShadow(
-          color: Colors.blue.withOpacity(0.2),
-          blurRadius: 10,
-          spreadRadius: 2,
-          offset: const Offset(0, 4),
-        ),
-      ],
-    ),
-    child: SizedBox(
-      width: double.infinity,
-      height: 60,
-      child: ElevatedButton.icon(
-        onPressed: _isSwinging ? null : _simulateSwing,
-        icon: AnimatedSwitcher(
-          duration: const Duration(milliseconds: 300),
-          child: Icon(
-            _isSwinging ? Icons.sports_golf : Icons.golf_course_outlined,
-            size: 24,
-            key: ValueKey(_isSwinging),
+      );
+    }
+    
+    // Demo mode: manual record button
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(30),
+        boxShadow: [
+          BoxShadow(
+            color: (_isSwinging ? AppColors.surfaceLight : AppColors.primary).withOpacity(0.3),
+            blurRadius: 20,
+            spreadRadius: 0,
+            offset: const Offset(0, 8),
           ),
-        ),
-        label: Text(
-          _isSwinging ? 'Swinging...' : 'Start Record',
-          style: const TextStyle(
-            fontSize: 18,
-            fontWeight: FontWeight.bold,
-            letterSpacing: 0.5,
+        ],
+      ),
+      child: SizedBox(
+        width: double.infinity,
+        height: 64,
+        child: ElevatedButton.icon(
+          onPressed: (_isSerialConnected || !_isSwinging) ? _handleRecordButtonPress : null,
+          icon: AnimatedSwitcher(
+            duration: const Duration(milliseconds: 300),
+            child: Icon(
+              _isSerialConnected 
+                  ? (_isSwinging ? Icons.stop_circle : Icons.play_circle_fill)
+                  : (_isSwinging ? Icons.hourglass_top : Icons.play_circle_fill),
+              size: 28,
+              key: ValueKey(_isSwinging),
+            ),
           ),
-        ),
-        style: ElevatedButton.styleFrom(
-          backgroundColor: _isSwinging ? Colors.grey[800] : Colors.blue,
-          foregroundColor: Colors.white,
-          elevation: _isSwinging ? 0 : 4,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(30),
+          label: Text(
+            _isSwinging 
+                ? (_isSerialConnected ? 'STOP RECORD' : 'STOP RECORD') 
+                : (_isSerialConnected ? 'START RECORD' : 'START RECORD'),
+            style: const TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 1,
+            ),
+          ),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: _isSerialConnected && _isSwinging ? Colors.red.shade800 : (_isSwinging ? AppColors.surfaceLight : AppColors.primary),
+            foregroundColor: Colors.white,
+            elevation: 0,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(30),
+            ),
           ),
         ),
       ),
-    ),
-  );
+    );
+  }
 
-  LineChartData _buildChartData() {
+  LineChartData _buildSingleLineChartData(List<FlSpot> dataPoints, Color lineColor) {
     return LineChartData(
+      clipData: const FlClipData.all(),
       gridData: FlGridData(
         show: true,
-        drawVerticalLine: true,
+        drawVerticalLine: false,
         horizontalInterval: 25,
-        getDrawingHorizontalLine: (value) =>
-            FlLine(color: Colors.white24, strokeWidth: 0.5),
-        getDrawingVerticalLine: (value) =>
-            FlLine(color: Colors.white12, strokeWidth: 0.5),
+        getDrawingHorizontalLine: (value) {
+          return FlLine(color: Colors.white.withOpacity(0.08), strokeWidth: 1);
+        },
       ),
       titlesData: FlTitlesData(
-        rightTitles: const AxisTitles(
-          sideTitles: SideTitles(showTitles: false),
-        ),
+        rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
         topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-        bottomTitles: const AxisTitles(
-          sideTitles: SideTitles(showTitles: false),
-        ),
+        bottomTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
         leftTitles: AxisTitles(
           sideTitles: SideTitles(
             showTitles: true,
-            interval: 25,
-            getTitlesWidget: (value, meta) => Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: Text(
-                '${value.toInt()}%',
-                style: const TextStyle(color: Colors.white54, fontSize: 12),
-              ),
-            ),
-            reservedSize: 40,
+            interval: 50,
+            getTitlesWidget: (value, meta) {
+              if (value == 100) return Padding(padding: const EdgeInsets.only(right: 4), child: Text('100', style: TextStyle(color: lineColor.withOpacity(0.6), fontSize: 8, fontWeight: FontWeight.bold)));
+              if (value == 50) return Padding(padding: const EdgeInsets.only(right: 4), child: Text('50', style: TextStyle(color: lineColor.withOpacity(0.6), fontSize: 8, fontWeight: FontWeight.bold)));
+              if (value == 0) return Padding(padding: const EdgeInsets.only(right: 4), child: Text('0', style: TextStyle(color: lineColor.withOpacity(0.6), fontSize: 8, fontWeight: FontWeight.bold)));
+              return const SizedBox.shrink();
+            },
+            reservedSize: 28,
           ),
         ),
       ),
       borderData: FlBorderData(show: false),
-      minX: _graphXValue - 2, // แสดงช่วง 2 วินาทีล่าสุด
-      maxX: _graphXValue,
+      minX: (_graphXValue - 2).clamp(0, double.infinity),
+      maxX: _graphXValue < 2 ? 2 : _graphXValue,
       minY: 0,
       maxY: 100,
       lineBarsData: [
-        _createLineChartBarData(_leftDataPoints, const Color(0xFF3B82F6)),
-        _createLineChartBarData(_rightDataPoints, const Color(0xFFEC4899)),
+        _createLineChartBarData(dataPoints, lineColor),
       ],
+      lineTouchData: LineTouchData(
+        touchTooltipData: LineTouchTooltipData(
+          getTooltipColor: (touchedSpot) => AppColors.surfaceLight.withOpacity(0.9),
+        ),
+      ),
     );
   }
 
+  LineChartData _buildGRFChartData() {
+    final bool calibrated = _serialService.isCalibrated;
+  final double maxY = calibrated ? 3.0 : 100;
+  final double interval = calibrated ? 1.0 : 25;
+
+  return LineChartData(
+    clipData: const FlClipData.all(),
+    gridData: FlGridData(
+      show: true,
+      drawVerticalLine: false,
+      horizontalInterval: interval,
+      getDrawingHorizontalLine: (value) {
+        // Highlight the 1.0 BW line when calibrated
+        if (calibrated && (value - 1.0).abs() < 0.01) {
+          return FlLine(color: Colors.white.withOpacity(0.25), strokeWidth: 1, dashArray: [4, 4]);
+        }
+        return FlLine(color: Colors.white.withOpacity(0.1), strokeWidth: 1);
+      },
+    ),
+    titlesData: FlTitlesData(
+      rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+      topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+      bottomTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+      leftTitles: AxisTitles(
+        sideTitles: SideTitles(
+          showTitles: true,
+          interval: interval,
+          getTitlesWidget: (value, meta) {
+            final style = TextStyle(color: Colors.blueAccent.withOpacity(0.6), fontSize: 8, fontWeight: FontWeight.bold);
+            if (calibrated) {
+              if (value == 0) return Padding(padding: const EdgeInsets.only(right: 4), child: Text('0x', style: style));
+              if (value == 1) return Padding(padding: const EdgeInsets.only(right: 4), child: Text('1x', style: style));
+              if (value == 2) return Padding(padding: const EdgeInsets.only(right: 4), child: Text('2x', style: style));
+              if (value == 3) return Padding(padding: const EdgeInsets.only(right: 4), child: Text('3x', style: style));
+            } else {
+              if (value == 100) return Padding(padding: const EdgeInsets.only(right: 4), child: Text('100', style: style));
+              if (value == 50) return Padding(padding: const EdgeInsets.only(right: 4), child: Text('50', style: style));
+              if (value == 0) return Padding(padding: const EdgeInsets.only(right: 4), child: Text('0', style: style));
+            }
+            return const SizedBox.shrink();
+          },
+          reservedSize: 28,
+        ),
+      ),
+    ),
+    borderData: FlBorderData(show: false),
+    minX: (_graphXValue - 2).clamp(0, double.infinity),
+    maxX: _graphXValue < 2 ? 2 : _graphXValue,
+    minY: 0,
+    maxY: maxY,
+    lineBarsData: [
+      _createLineChartBarData(_totalForceDataPoints, Colors.blueAccent),
+    ],
+    lineTouchData: LineTouchData(
+      touchTooltipData: LineTouchTooltipData(
+        getTooltipColor: (touchedSpot) => AppColors.surfaceLight.withOpacity(0.9),
+      ),
+    ),
+  );
+}
+
   LineChartBarData _createLineChartBarData(List<FlSpot> spots, Color color) {
+    // Prevent empty list which causes chart overflow
+    final safeSpots = spots.isEmpty ? [FlSpot(0, 50)] : spots;
     return LineChartBarData(
-      spots: spots,
+      spots: safeSpots,
       isCurved: true,
       color: color,
-      barWidth: 2,
+      barWidth: 3,
       isStrokeCapRound: true,
-      dotData: const FlDotData(show: false),
-      belowBarData: BarAreaData(show: true, color: color.withOpacity(0.1)),
+      dotData: FlDotData(
+        show: true,
+        getDotPainter: (spot, percent, barData, index) {
+          // Only show dot on the last (current) point
+          if (index == spots.length - 1) {
+            return FlDotCirclePainter(
+              radius: 5,
+              color: color,
+              strokeWidth: 2,
+              strokeColor: Colors.white,
+            );
+          }
+          return FlDotCirclePainter(radius: 0, color: Colors.transparent);
+        },
+      ),
+      belowBarData: BarAreaData(
+        show: true,
+        gradient: LinearGradient(
+          colors: [
+            color.withOpacity(0.3),
+            color.withOpacity(0.0),
+          ],
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+        ),
+      ),
     );
   }
 }
 
-// ... Custom Widgets (_WeightCard, _LegendItem) ...
 class _WeightCard extends StatelessWidget {
   final String label;
   final double percentage;
   final Color color;
+  final String side;
 
   const _WeightCard({
     required this.label,
     required this.percentage,
     required this.color,
+    required this.side,
   });
 
   @override
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.all(24),
-      height: 150,
+      constraints: const BoxConstraints(minHeight: 160),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(24),
-        color: const Color(0xFF1F2937),
+        color: AppColors.surfaceDark,
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+             AppColors.surfaceDark,
+             AppColors.surfaceDark.withRed(35).withBlue(50), // Subtle shift
+          ],
+        ),
+        boxShadow: [
+          BoxShadow(
+             color: color.withOpacity(0.1),
+             blurRadius: 20,
+             offset: const Offset(0, 10),
+          )
+        ],
+        border: Border.all(color: Colors.white.withOpacity(0.05)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(
-            label,
-            style: const TextStyle(
-              color: Colors.white70,
-              fontSize: 16,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-          const Spacer(),
-          Center(
-            child: Text(
-              '${percentage.toStringAsFixed(1)}%',
-              style: TextStyle(
-                fontSize: 48,
-                fontWeight: FontWeight.bold,
-                color: color,
+          Row(
+            children: [
+              Container(
+                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                 decoration: BoxDecoration(
+                   color: color.withOpacity(0.2),
+                   borderRadius: BorderRadius.circular(8),
+                 ),
+                 child: Text(side, style: TextStyle(color: color, fontWeight: FontWeight.bold)),
               ),
-            ),
+              const SizedBox(width: 8),
+              Text(
+                label,
+                style: const TextStyle(
+                  color: AppColors.textSecondary,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
           ),
-          const Spacer(),
+          const SizedBox(height: 16),
+          Center(
+             child: Text(
+               '${percentage.toStringAsFixed(1)}%',
+               style: TextStyle(
+                 fontSize: 42,
+                 fontWeight: FontWeight.bold,
+                 color: Colors.white,
+                 shadows: [
+                   Shadow(
+                      color: color.withOpacity(0.5),
+                      blurRadius: 15,
+                   ),
+                 ],
+               ),
+             ),
+          ),
+          const SizedBox(height: 16),
           ClipRRect(
             borderRadius: BorderRadius.circular(10),
             child: LinearProgressIndicator(
               value: percentage / 100,
-              minHeight: 8,
-              backgroundColor: Colors.white.withOpacity(0.1),
+              backgroundColor: Colors.white10,
               valueColor: AlwaysStoppedAnimation<Color>(color),
+              minHeight: 8,
             ),
           ),
         ],
@@ -570,7 +2068,9 @@ class _WeightCard extends StatelessWidget {
 class _LegendItem extends StatelessWidget {
   final String label;
   final Color color;
+
   const _LegendItem({required this.label, required this.color});
+
   @override
   Widget build(BuildContext context) {
     return Row(
@@ -578,14 +2078,193 @@ class _LegendItem extends StatelessWidget {
         Container(
           width: 12,
           height: 12,
-          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+          decoration: BoxDecoration(
+            color: color,
+            shape: BoxShape.circle,
+            boxShadow: [
+               BoxShadow(color: color.withOpacity(0.5), blurRadius: 4),
+            ]
+          ),
         ),
         const SizedBox(width: 8),
         Text(
           label,
-          style: const TextStyle(color: Colors.white60, fontSize: 14),
+          style: const TextStyle(
+            color: AppColors.textSecondary,
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+          ),
         ),
       ],
+    );
+  }
+}
+
+class _CalibrationDialog extends StatefulWidget {
+  final Function(double) onCalibrationComplete;
+  final VoidCallback onSkip;
+
+  const _CalibrationDialog({
+    super.key,
+    required this.onCalibrationComplete,
+    required this.onSkip,
+  });
+
+  @override
+  State<_CalibrationDialog> createState() => _CalibrationDialogState();
+}
+
+class _CalibrationDialogState extends State<_CalibrationDialog> with SingleTickerProviderStateMixin {
+  int _step = 0; // 0: Waiting for user, 1: Countdown, 2: Calibrating
+  int _countdown = 3;
+  Timer? _timer;
+  late AnimationController _progressController;
+  
+  StreamSubscription<List<int>>? _sensorSubscription;
+  final SerialService _serialService = SerialService();
+  static const double _threshold = 300.0;
+  List<double> _samples = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _progressController = AnimationController(vsync: this, duration: const Duration(milliseconds: 3000));
+    _startListening();
+  }
+
+  @override
+  void dispose() {
+    _sensorSubscription?.cancel();
+    _timer?.cancel();
+    _progressController.dispose();
+    super.dispose();
+  }
+
+  void _startListening() {
+    if (_serialService.isConnected) {
+      _sensorSubscription = _serialService.dataStream.listen(_processSensorData);
+    }
+  }
+
+  void _processSensorData(List<int> sensors) {
+    if (!mounted) return;
+
+    double totalForce = 0;
+    int getValue(int index) => (index < sensors.length) ? sensors[index] : 0;
+    for (int i = 0; i < 25; i++) totalForce += getValue(32 + i);
+    for (int i = 0; i < 25; i++) totalForce += getValue(0 + i);
+
+    if (_step == 0) {
+      if (totalForce > _threshold) _startCountdown();
+    } else if (_step == 1) {
+      if (totalForce < _threshold) _resetToWaiting();
+    } else if (_step == 2) {
+      if (totalForce > _threshold) _samples.add(totalForce);
+    }
+  }
+
+  void _startCountdown() {
+    setState(() => _step = 1);
+    _countdown = 3;
+    _timer?.cancel();
+    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) { timer.cancel(); return; }
+      if (_countdown > 1) {
+        setState(() => _countdown--);
+      } else {
+        timer.cancel();
+        _startCalibrating();
+      }
+    });
+  }
+
+  void _resetToWaiting() {
+    _timer?.cancel();
+    setState(() {
+      _step = 0;
+      _countdown = 3;
+    });
+  }
+
+  void _startCalibrating() {
+    if (!mounted) return;
+    setState(() => _step = 2);
+    _samples = [];
+    _progressController.forward();
+    
+    // Run calibration for 3 seconds
+    Future.delayed(const Duration(milliseconds: 3000), () {
+      if (!mounted) return;
+      if (_samples.isEmpty) {
+        _resetToWaiting(); // No data, try again
+        return;
+      }
+      
+      double baseline = _samples.reduce((a, b) => a + b) / _samples.length;
+      
+      // Update Service singleton
+      _serialService.isCalibrated = true;
+      _serialService.baselineForce = baseline;
+      
+      widget.onCalibrationComplete(baseline);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: const Color(0xFF1E293B),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      child: Container(
+        padding: const EdgeInsets.all(24),
+        width: 320,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: (_step == 0 ? Colors.blueAccent : (_step == 1 ? Colors.amber : Colors.greenAccent)).withOpacity(0.1),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                _step == 0 ? Icons.accessibility_new : (_step == 1 ? Icons.timer : Icons.sensors),
+                size: 32,
+                color: _step == 0 ? Colors.blueAccent : (_step == 1 ? Colors.amber : Colors.greenAccent),
+              ),
+            ),
+            const SizedBox(height: 20),
+            if (_step == 0) ...[
+              const Text('Calibrate Sensor', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 12),
+              Text('Step on the mat with both feet to start.', textAlign: TextAlign.center, style: TextStyle(color: Colors.white70, fontSize: 16)),
+              const SizedBox(height: 8),
+              Text('Measurement will start automatically.', textAlign: TextAlign.center, style: TextStyle(color: Colors.white38, fontSize: 12)),
+              const SizedBox(height: 24),
+              TextButton(onPressed: widget.onSkip, child: Text('Skip', style: TextStyle(color: Colors.white24))),
+            ] else if (_step == 1) ...[
+              const Text('Get Ready', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 20),
+              Text('$_countdown', style: const TextStyle(color: Colors.amber, fontSize: 48, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 20),
+              Text('Keep standing...', style: TextStyle(color: Colors.white54, fontSize: 14)),
+            ] else ...[
+              const Text('Calibrating...', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 24),
+              AnimatedBuilder(
+                animation: _progressController,
+                builder: (context, child) => LinearProgressIndicator(
+                  value: _progressController.value,
+                  backgroundColor: Colors.white10,
+                  valueColor: const AlwaysStoppedAnimation<Color>(Colors.greenAccent),
+                ),
+              ),
+              const SizedBox(height: 20),
+              Text('Measuring baseline...', style: TextStyle(color: Colors.white54, fontSize: 14)),
+            ],
+          ],
+        ),
+      ),
     );
   }
 }

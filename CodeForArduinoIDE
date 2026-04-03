@@ -1,0 +1,151 @@
+อันนี้ฉันต่อวงจรใหม่
+
+
+
+// --- กำหนดขา Control (ใช้ร่วมกันทั้ง 4 MUX) ---
+
+const int S0 = 13;
+
+const int S1 = 12;
+
+const int S2 = 14;
+
+const int S3 = 26;
+
+
+
+// --- กำหนดขา Signal ของ MUX 1-4 ---
+
+const int MUX1_PIN = 34; // Sensors 1-16
+
+const int MUX2_PIN = 35; // Sensors 17-32
+
+const int MUX3_PIN = 32; // Sensors 33-48
+
+const int MUX4_PIN = 33; // Sensors 49-64
+
+
+
+// ตัวแปรเก็บค่าเซนเซอร์ 64 ตัว
+
+int sensorValues[64];
+
+
+
+void setup() {
+
+Serial.begin(115200);
+
+
+
+// กำหนดขา Control เป็น Output
+
+pinMode(S0, OUTPUT);
+
+pinMode(S1, OUTPUT);
+
+pinMode(S2, OUTPUT);
+
+pinMode(S3, OUTPUT);
+
+
+
+// กำหนดขา Signal เป็น Input
+
+pinMode(MUX1_PIN, INPUT);
+
+pinMode(MUX2_PIN, INPUT);
+
+pinMode(MUX3_PIN, INPUT);
+
+pinMode(MUX4_PIN, INPUT);
+
+}
+
+
+
+void loop() {
+
+// 1. วนลูปอ่านค่าจาก MUX (0-15)
+
+for (int ch = 0; ch < 16; ch++) {
+
+// สั่ง Control Pins
+
+digitalWrite(S0, (ch & 0x01));
+
+digitalWrite(S1, (ch & 0x02));
+
+digitalWrite(S2, (ch & 0x04));
+
+digitalWrite(S3, (ch & 0x08));
+
+
+
+// รอสัญญาณนิ่ง
+
+delayMicroseconds(50);
+
+
+
+// อ่านค่าและเก็บลง Array (เรียงตามลำดับ 1-64)
+
+// Mux 1 (ตัวที่ 1-16) -> index 0-15
+
+sensorValues[ch] = analogRead(MUX1_PIN);
+
+
+// Mux 2 (ตัวที่ 17-32) -> index 16-31
+
+sensorValues[16 + ch] = analogRead(MUX2_PIN);
+
+
+// Mux 3 (ตัวที่ 33-48) -> index 32-47
+
+sensorValues[32 + ch] = analogRead(MUX3_PIN);
+
+
+// Mux 4 (ตัวที่ 49-64) -> index 48-63
+
+sensorValues[48 + ch] = analogRead(MUX4_PIN);
+
+}
+
+
+
+// 2. ส่งข้อมูลออกทาง Serial (CSV Format)
+
+// รูปแบบ: val1,val2,val3,...,val64
+
+for (int i = 0; i < 64; i++) {
+
+// กรอง Noise (ถ้าต่ำกว่า 50 ให้เป็น 0)
+
+if (sensorValues[i] < 50) sensorValues[i] = 0;
+
+
+
+Serial.print(sensorValues[i]);
+
+
+// ถ้าไม่ใช่ตัวสุดท้าย ให้ใส่ลูกน้ำคั่น
+
+if (i < 63) {
+
+Serial.print(",");
+
+}
+
+}
+
+
+// ขึ้นบรรทัดใหม่เมื่อครบ 64 ตัว
+
+Serial.println();
+
+
+// หน่วงเวลาส่งข้อมูล (ปรับได้ตามความลื่นที่ต้องการ)
+
+delay(20);
+
+}
